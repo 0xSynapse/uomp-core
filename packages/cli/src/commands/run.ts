@@ -9,7 +9,7 @@ import { MemoryGuard } from '@uomp/guard';
 import { JWTTokenIssuer } from '@uomp/token';
 import { IdentityVerifier } from '@uomp/identity';
 import type { AgentManifest, Scopes } from '@uomp/core';
-import { normalizeManifest } from '@uomp/core';
+import { buildReadScope, normalizeManifest } from '@uomp/core';
 import { loadManifest } from '../utils/manifest.js';
 
 export class RunCommands {
@@ -24,11 +24,13 @@ export class RunCommands {
     this.authService = new AuthService({
       dbPath: config.authDbPath,
       issuer: this.issuer,
+      adminToken: config.adminToken,
     });
     this.guard = new MemoryGuard({
       dbPath: config.auditDbPath,
       memoryDbPath: config.memoryDbPath,
       issuer: this.issuer,
+      sessionStateProvider: this.authService,
     });
   }
 
@@ -124,12 +126,7 @@ export class RunCommands {
       ]);
 
       return {
-        read: {
-          tags: selectedTags as string[],
-          keys: manifest.requestedScopes.read.keys ?? [],
-          denyTags: [],
-          denyKeys: [],
-        },
+        read: buildReadScope(manifest.requestedScopes.read, selectedTags as string[]),
         write: {
           tags: [],
           keys: [],

@@ -8,6 +8,13 @@ API_URL="${UOMP_API_URL:-http://127.0.0.1:9374}"
 GW_URL="${UOMP_GATEWAY_URL:-https://localhost:9443}"
 UOMP_DIR="$(dirname "$0")/.."
 
+ADMIN_TOKEN_FILE="${UOMP_ADMIN_TOKEN_FILE:-$HOME/.uomp/.secrets/admin-token}"
+ADMIN_TOKEN="$(cat "$ADMIN_TOKEN_FILE" 2>/dev/null || true)"
+if [ -z "$ADMIN_TOKEN" ]; then
+  echo "Admin token not found at $ADMIN_TOKEN_FILE" >&2
+  exit 1
+fi
+
 echo "═══════════════════════════════════════"
 echo "  UOMP Stock Analyst v0.2 E2E Test"
 echo "═══════════════════════════════════════"
@@ -59,13 +66,14 @@ if ! curl -s -k --cert ~/.uomp/.gateway-certs/client.crt --key ~/.uomp/.gateway-
 fi
 
 SESS=$(curl -s -X POST "$API_URL/v1/sessions" -H 'Content-Type: application/json' \
+  -H "x-uomp-admin-token: $ADMIN_TOKEN" \
   -d "{\"agent_id\":\"stock-analyst\",\"agent_name\":\"Stock Analyst\",\"requested_scopes\":{\"read\":{\"tags\":[\"portfolio:holdings\",\"profile:risk\"],\"keys\":$KEYS,\"denyTags\":[],\"denyKeys\":[]},\"write\":{\"tags\":[],\"keys\":[],\"denyTags\":[],\"denyKeys\":[]}},\"duration_minutes\":30}" | jq -r '.session_id')
 
 echo "  Session: $SESS"
 
 GRANT=$(jq -n --arg audience "$GW_URL" --argjson keys "$KEYS" \
   '{granted_scopes:{read:{tags:["portfolio:holdings","profile:risk"],keys:$keys,denyTags:[],denyKeys:[]},write:{tags:[],keys:[],denyTags:[],denyKeys:[]}},profile:"remote",audience:$audience,allowed_fields:["key","value"]}')
-TOKEN=$(curl -s -X POST "$API_URL/v1/sessions/$SESS/grant" -H 'Content-Type: application/json' -d "$GRANT" | jq -r '.token')
+TOKEN=$(curl -s -X POST "$API_URL/v1/sessions/$SESS/grant" -H 'Content-Type: application/json' -H "x-uomp-admin-token: $ADMIN_TOKEN" -d "$GRANT" | jq -r '.token')
 
 export UOM_TOKEN="$TOKEN"
 export UOMP_BASE_URL="$GW_URL"

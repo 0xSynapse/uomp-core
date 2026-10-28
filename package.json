@@ -8,7 +8,8 @@
     "build": "pnpm -r build",
     "dev": "pnpm --filter @uomp/server dev",
     "cli": "node ./packages/cli/dist/cli.js",
-    "test": "pnpm -r test",
+    "test": "pnpm build && node --test tests/integration/*.test.mjs",
+    "test:integration": "node --test tests/integration/*.test.mjs",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck"
   },

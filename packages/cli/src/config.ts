@@ -11,6 +11,7 @@ import {
   DEFAULT_PORT,
   DEFAULT_HOST,
 } from '@uomp/core';
+import { loadOrCreateAdminToken } from '@uomp/auth';
 
 export class UompConfig {
   readonly dataDir: string;
@@ -22,6 +23,7 @@ export class UompConfig {
   readonly authDbPath: string;
   readonly port: number;
   readonly host: string;
+  adminToken!: string;
 
   constructor() {
     this.dataDir = join(homedir(), DATA_DIR_NAME);
@@ -40,6 +42,7 @@ export class UompConfig {
     await mkdir(this.agentsDir, { recursive: true });
     await mkdir(this.registryDir, { recursive: true });
     await mkdir(this.secretsDir, { recursive: true });
+    this.adminToken = loadOrCreateAdminToken(this.secretsDir);
   }
 
   get serverUrl(): string {

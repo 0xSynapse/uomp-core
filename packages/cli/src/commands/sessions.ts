@@ -11,7 +11,7 @@ export class SessionsCommands {
     await config.init();
     const issuer = new JWTTokenIssuer();
     await issuer.loadOrGenerateKey(config.secretsDir);
-    const auth = new AuthService({ dbPath: config.authDbPath, issuer });
+    const auth = new AuthService({ dbPath: config.authDbPath, issuer, adminToken: config.adminToken });
     const guard = new MemoryGuard({ dbPath: config.auditDbPath, memoryDbPath: config.memoryDbPath, issuer });
     return { auth, guard };
   }
