@@ -14,6 +14,7 @@ export const AUDIT_DB_NAME = 'audit.db';
 export const AUTH_DB_NAME = 'auth.db';
 export const PRIVATE_KEY_FILE_NAME = 'ed25519-private.jwk';
 export const PUBLIC_KEY_FILE_NAME = 'ed25519-public.jwk';
+export const ADMIN_TOKEN_FILE_NAME = 'admin-token';
 
 export type Sensitivity = 'low' | 'medium' | 'high';
 
@@ -139,6 +140,21 @@ export interface RawAgentManifest {
   package?: { checksum?: string; signature?: string; source_url?: string };
   external_data_sources?: string[];
   data_retention_policy?: { max_retention_seconds?: number; deletion_method?: string; proof_required?: boolean; description?: string; third_party_sharing?: boolean; encryption_at_rest?: boolean };
+}
+
+/**
+ * Build the read scope that will actually be granted from a manifest's
+ * requested read scope. Denials and field restrictions are carried over so
+ * that a narrower manifest request cannot be widened during authorization.
+ */
+export function buildReadScope(requested: ScopeAction, selectedTags: string[]): ScopeAction {
+  return {
+    tags: [...selectedTags],
+    keys: [...(requested.keys ?? [])],
+    denyTags: [...(requested.denyTags ?? [])],
+    denyKeys: [...(requested.denyKeys ?? [])],
+    ...(requested.allowedFields ? { allowedFields: [...requested.allowedFields] } : {}),
+  };
 }
 
 export function normalizeManifest(raw: RawAgentManifest): AgentManifest {

@@ -160,6 +160,8 @@ export UOMP_BASE_URL="http://127.0.0.1:9374"
 node ./examples/calendar-agent/index.js
 ```
 
+> Admin operations (`createSession`, `grant`, `revoke`) require the local admin token stored at `~/.uomp/.secrets/admin-token`. The Node SDK only reads `UOMP_ADMIN_TOKEN` when the base URL is loopback.
+
 #### Local development shortcut
 
 ```bash
@@ -471,6 +473,8 @@ export UOM_TOKEN="<token>"
 export UOMP_BASE_URL="http://127.0.0.1:9374"
 node ./examples/calendar-agent/index.js
 ```
+
+> 管理员操作（`createSession`、`grant`、`revoke`）需要本机管理员令牌，默认存放在 `~/.uomp/.secrets/admin-token`。Node SDK 仅在 base URL 为 loopback 时读取 `UOMP_ADMIN_TOKEN`。
 
 #### 方式二：本地开发 shortcut
 

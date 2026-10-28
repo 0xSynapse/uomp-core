@@ -6,11 +6,22 @@ import { MemoryStore, AsyncStoreAdapter } from '@uomp/store';
 import type { IMemoryStore } from '@uomp/store';
 import { JWTTokenIssuer, isTokenExpired, type CapabilityTokenPayload } from '@uomp/token';
 
+export interface GuardSessionState {
+  status: string;
+  expiresAt: string;
+}
+
+export interface SessionStateProvider {
+  getSession(sessionId: string): GuardSessionState | null;
+  isTokenBlacklisted(sessionId: string): boolean;
+}
+
 export interface GuardOptions {
   dbPath: string;
   memoryDbPath: string;
   issuer: JWTTokenIssuer;
   store?: IMemoryStore;
+  sessionStateProvider?: SessionStateProvider;
 }
 
 export interface AuditLogEntry {
@@ -29,12 +40,14 @@ export class MemoryGuard {
   private db: Database.Database;
   private store: IMemoryStore;
   private issuer: JWTTokenIssuer;
+  private sessionStateProvider?: SessionStateProvider;
   private app: Hono;
 
   constructor(options: GuardOptions) {
     this.db = new Database(options.dbPath);
     this.store = options.store ?? new AsyncStoreAdapter(new MemoryStore({ dbPath: options.memoryDbPath }));
     this.issuer = options.issuer;
+    this.sessionStateProvider = options.sessionStateProvider;
     this.initSchema();
     this.app = this.createApp();
   }
@@ -84,7 +97,10 @@ export class MemoryGuard {
           allowed: false,
           reason: validation.reason,
         });
-        return c.json({ error: { code: validation.errorCode, message: validation.reason, session_id: validation.sessionId } }, 403);
+        return c.json(
+          { error: { code: validation.errorCode, message: validation.reason, session_id: validation.sessionId } },
+          this.statusForValidationError(validation.errorCode)
+        );
       }
 
       if (!tag) {
@@ -130,7 +146,10 @@ export class MemoryGuard {
           allowed: false,
           reason: validation.reason,
         });
-        return c.json({ error: { code: validation.errorCode, message: validation.reason, session_id: validation.sessionId } }, 403);
+        return c.json(
+          { error: { code: validation.errorCode, message: validation.reason, session_id: validation.sessionId } },
+          this.statusForValidationError(validation.errorCode)
+        );
       }
 
       if (validation.payload!.aggregationOnly) {
@@ -170,7 +189,10 @@ export class MemoryGuard {
           allowed: false,
           reason: validation.reason,
         });
-        return c.json({ error: { code: validation.errorCode, message: validation.reason, session_id: validation.sessionId } }, 403);
+        return c.json(
+          { error: { code: validation.errorCode, message: validation.reason, session_id: validation.sessionId } },
+          this.statusForValidationError(validation.errorCode)
+        );
       }
 
       if (validation.payload!.aggregationOnly) {
@@ -206,16 +228,21 @@ export class MemoryGuard {
       const authHeader = c.req.header('authorization');
       const validation = await this.validateRequest(authHeader);
 
-      if (validation.valid) {
-        this.logAudit({
-          sessionId: validation.payload!.sessionId,
-          agentId: validation.payload!.agentId,
-          action: 'write',
-          key,
-          allowed: false,
-          reason: 'WRITE_NOT_AVAILABLE_IN_MVP',
-        });
+      if (!validation.valid) {
+        return c.json(
+          { error: { code: validation.errorCode, message: validation.reason, session_id: validation.sessionId } },
+          this.statusForValidationError(validation.errorCode)
+        );
       }
+
+      this.logAudit({
+        sessionId: validation.payload.sessionId,
+        agentId: validation.payload.agentId,
+        action: 'write',
+        key,
+        allowed: false,
+        reason: 'WRITE_NOT_AVAILABLE_IN_MVP',
+      });
 
       return c.json({ error: { code: 'WRITE_NOT_AVAILABLE', message: 'Agent writes are not available in MVP', session_id: validation.sessionId } }, 503);
     });
@@ -225,16 +252,21 @@ export class MemoryGuard {
       const authHeader = c.req.header('authorization');
       const validation = await this.validateRequest(authHeader);
 
-      if (validation.valid) {
-        this.logAudit({
-          sessionId: validation.payload!.sessionId,
-          agentId: validation.payload!.agentId,
-          action: 'delete',
-          key,
-          allowed: false,
-          reason: 'DELETE_NOT_AVAILABLE_IN_MVP',
-        });
+      if (!validation.valid) {
+        return c.json(
+          { error: { code: validation.errorCode, message: validation.reason, session_id: validation.sessionId } },
+          this.statusForValidationError(validation.errorCode)
+        );
       }
+
+      this.logAudit({
+        sessionId: validation.payload.sessionId,
+        agentId: validation.payload.agentId,
+        action: 'delete',
+        key,
+        allowed: false,
+        reason: 'DELETE_NOT_AVAILABLE_IN_MVP',
+      });
 
       return c.json({ error: { code: 'WRITE_NOT_AVAILABLE', message: 'Agent deletes are not available in MVP', session_id: validation.sessionId } }, 503);
     });
@@ -247,7 +279,10 @@ export class MemoryGuard {
 
       const validation = await this.validateRequest(authHeader);
       if (!validation.valid) {
-        return c.json({ error: { code: validation.errorCode, message: validation.reason } }, 403);
+        return c.json(
+          { error: { code: validation.errorCode, message: validation.reason } },
+          this.statusForValidationError(validation.errorCode)
+        );
       }
 
       // Agents may only query their own audit trail
@@ -282,10 +317,43 @@ export class MemoryGuard {
         return { valid: false, reason: 'Token expired', errorCode: 'TOKEN_EXPIRED', sessionId: payload.sessionId, agentId: payload.agentId };
       }
 
+      if (!this.sessionStateProvider) {
+        return {
+          valid: false,
+          reason: 'Session state provider is not configured',
+          errorCode: 'SESSION_VALIDATION_UNAVAILABLE',
+          sessionId: payload.sessionId,
+          agentId: payload.agentId,
+        };
+      }
+
+      const session = this.sessionStateProvider.getSession(payload.sessionId);
+      if (!session) {
+        return { valid: false, reason: 'Session not found', errorCode: 'SESSION_NOT_FOUND', sessionId: payload.sessionId, agentId: payload.agentId };
+      }
+
+      if (session.status !== 'active') {
+        return {
+          valid: false,
+          reason: `Session is not active (status: ${session.status})`,
+          errorCode: 'SESSION_NOT_ACTIVE',
+          sessionId: payload.sessionId,
+          agentId: payload.agentId,
+        };
+      }
+
+      if (this.sessionStateProvider.isTokenBlacklisted(payload.sessionId)) {
+        return { valid: false, reason: 'Token has been revoked', errorCode: 'TOKEN_REVOKED', sessionId: payload.sessionId, agentId: payload.agentId };
+      }
+
       return { valid: true, payload, sessionId: payload.sessionId, agentId: payload.agentId };
     } catch (err) {
       return { valid: false, reason: `Token validation failed: ${(err as Error).message}`, errorCode: 'INVALID_TOKEN' };
     }
+  }
+
+  private statusForValidationError(errorCode: string): 403 | 503 {
+    return errorCode === 'SESSION_VALIDATION_UNAVAILABLE' ? 503 : 403;
   }
 
   private isKeyAllowed(key: string, item: MemoryItem | null, payload: CapabilityTokenPayload, action: 'read' | 'write'): { allowed: boolean; reason: string } {

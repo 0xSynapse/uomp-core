@@ -3,7 +3,7 @@ import { mkdir } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
 import { DEFAULT_HOST, DEFAULT_PORT, DATA_DIR_NAME, SECRETS_DIR_NAME } from '@uomp/core';
-import { AuthService } from '@uomp/auth';
+import { AuthService, loadOrCreateAdminToken } from '@uomp/auth';
 import { MemoryGuard } from '@uomp/guard';
 import { JWTTokenIssuer } from '@uomp/token';
 
@@ -20,15 +20,19 @@ async function main() {
   const auditDbPath = join(dataDir, 'audit.db');
   const memoryDbPath = join(dataDir, 'memory.db');
 
+  const adminToken = loadOrCreateAdminToken(secretsDir);
+
   const authService = new AuthService({
     dbPath: authDbPath,
     issuer,
+    adminToken,
   });
 
   const guard = new MemoryGuard({
     dbPath: auditDbPath,
     memoryDbPath,
     issuer,
+    sessionStateProvider: authService,
   });
 
   const authApp = authService.getApp();

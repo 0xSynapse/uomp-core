@@ -11,7 +11,7 @@ import { JWTTokenIssuer } from '@uomp/token';
 import { IdentityVerifier } from '@uomp/identity';
 import { loadManifest } from '../utils/manifest.js';
 import type { AgentManifest, ScopeAction, Scopes } from '@uomp/core';
-import { inferSensitivity } from '@uomp/core';
+import { buildReadScope, inferSensitivity } from '@uomp/core';
 import { writeFile } from 'fs/promises';
 
 export class AuthorizeCommands {
@@ -27,11 +27,13 @@ export class AuthorizeCommands {
     this.authService = new AuthService({
       dbPath: config.authDbPath,
       issuer: this.issuer,
+      adminToken: config.adminToken,
     });
     this.guard = new MemoryGuard({
       dbPath: config.auditDbPath,
       memoryDbPath: config.memoryDbPath,
       issuer: this.issuer,
+      sessionStateProvider: this.authService,
     });
     this.store = new MemoryStore({ dbPath: config.memoryDbPath });
   }
@@ -163,12 +165,7 @@ export class AuthorizeCommands {
     ]);
 
     // Build final read scope
-    const readScope: ScopeAction = {
-      tags: selectedTags as string[],
-      keys: manifest.requestedScopes.read.keys ?? [],
-      denyTags: manifest.requestedScopes.read.denyTags ?? [],
-      denyKeys: manifest.requestedScopes.read.denyKeys ?? [],
-    };
+    const readScope: ScopeAction = buildReadScope(manifest.requestedScopes.read, selectedTags as string[]);
 
     // High sensitivity items require key-level authorization
     this.addHighSensitivityKeys(readScope, selectedTags as string[]);
@@ -185,12 +182,7 @@ export class AuthorizeCommands {
   }
 
   private buildScopesFromTags(manifest: AgentManifest, tags: string[]): Scopes {
-    const readScope: ScopeAction = {
-      tags,
-      keys: manifest.requestedScopes.read.keys ?? [],
-      denyTags: manifest.requestedScopes.read.denyTags ?? [],
-      denyKeys: manifest.requestedScopes.read.denyKeys ?? [],
-    };
+    const readScope: ScopeAction = buildReadScope(manifest.requestedScopes.read, tags);
     this.addHighSensitivityKeys(readScope, tags);
     return {
       read: readScope,

@@ -169,11 +169,9 @@ async function main() {
     });
   }
 
-  // Token validation middleware (skip health, session creation, and grant)
+  // Token validation middleware (health is the only unauthenticated path)
   app.use('/v1/*', async (c, next) => {
     if (c.req.path === '/v1/health') return next();
-    if (c.req.path === '/v1/sessions' && c.req.method === 'POST') return next();
-    if (c.req.path.startsWith('/v1/sessions/') && c.req.path.endsWith('/grant') && c.req.method === 'POST') return next();
 
     const authHeader = c.req.header('authorization');
     const agentId = c.req.header('x-uomp-agent-id');

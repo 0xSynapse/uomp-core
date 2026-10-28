@@ -16,8 +16,36 @@ export interface GrantResult {
   expires_at: string;
 }
 
+function isLoopbackBaseUrl(baseUrl: string): boolean {
+  try {
+    const hostname = new URL(baseUrl).hostname;
+    return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1' || hostname === '[::1]';
+  } catch {
+    return false;
+  }
+}
+
 export class AuthClient {
-  constructor(private transport: Transport) {}
+  private adminToken: string;
+
+  constructor(private transport: Transport) {
+    // Admin operations are local-only. Only auto-load the env token when the
+    // transport targets loopback, so a local admin secret is never sent to a
+    // remote Gateway by accident. Browser builds must not hold admin tokens.
+    const isNodeRuntime = typeof process !== 'undefined' && typeof process.versions?.node === 'string';
+    this.adminToken = isNodeRuntime && isLoopbackBaseUrl(transport.baseUrl)
+      ? process.env?.UOMP_ADMIN_TOKEN ?? ''
+      : '';
+  }
+
+  /** Set the local admin token used for create/grant/revoke */
+  setAdminToken(token: string): void {
+    this.adminToken = token;
+  }
+
+  private adminHeaders(): Record<string, string> {
+    return this.adminToken ? { 'x-uomp-admin-token': this.adminToken } : {};
+  }
 
   /** Create a new session */
   async createSession(params: {
@@ -28,7 +56,7 @@ export class AuthClient {
   }): Promise<SessionInfo> {
     return this.transport.requestJson<SessionInfo>('/v1/sessions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...this.adminHeaders() },
       body: JSON.stringify({
         agent_id: params.agentId,
         agent_name: params.agentName,
@@ -50,7 +78,7 @@ export class AuthClient {
   }): Promise<GrantResult> {
     return this.transport.requestJson<GrantResult>(`/v1/sessions/${params.sessionId}/grant`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...this.adminHeaders() },
       body: JSON.stringify({
         granted_scopes: params.grantedScopes,
         profile: params.profile,
@@ -66,6 +94,7 @@ export class AuthClient {
   async revoke(sessionId: string): Promise<SessionInfo> {
     return this.transport.requestJson<SessionInfo>(`/v1/sessions/${sessionId}/revoke`, {
       method: 'POST',
+      headers: this.adminHeaders(),
     });
   }
 
