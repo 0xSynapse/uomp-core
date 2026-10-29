@@ -1,649 +1,561 @@
-# UOMP MVP
+# UOMP
 
-<p align="center">
-  <b>User-Owned Memory Protocol — Reference Implementation</b><br/>
-  Keep your memory local. Grant AI Agents scoped, session-based access.
-</p>
+**The consent and audit layer between you and AI agents.**
+
+Your memory stays where it is. Agents get temporary, scoped, revocable access — and you can see exactly what they read.
 
 <p align="center">
   <a href="https://www.uomp.org">Website</a> •
   <a href="https://www.uomp.org/spec/">Protocol Spec</a> •
-  <a href="https://github.com/0xaicrypto/uomp">Protocol Repo</a> •
-  <a href="https://github.com/0xaicrypto/uomp-core/issues">Issues</a>
+  <a href="https://github.com/0xSynapse/uomp-core/issues">Issues</a>
 </p>
 
 <p align="center">
   <a href="https://www.uomp.org"><img src="https://img.shields.io/badge/website-uomp.org-0A0A0A?logo=google-chrome&logoColor=white" alt="Website" /></a>
   <a href="https://www.uomp.org/spec/"><img src="https://img.shields.io/badge/spec-Draft--00-6B7280" alt="Spec" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" /></a>
-  <a href="https://github.com/0xaicrypto/uomp/discussions"><img src="https://img.shields.io/github/discussions/0xaicrypto/uomp" alt="Discussions" /></a>
-  <a href="https://github.com/0xaicrypto/uomp-core/issues"><img src="https://img.shields.io/github/issues/0xaicrypto/uomp-core" alt="Issues" /></a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/0xaicrypto/uomp-core/stargazers"><img src="https://img.shields.io/github/stars/0xaicrypto/uomp-core?style=for-the-badge&color=8B5CF6" alt="GitHub Stars" /></a>
 </p>
 
 <p align="center">
   <a href="#english">English</a> | <a href="#中文">中文</a>
 </p>
 
+> **Status: early reference implementation, CLI-first.** The local loop works end-to-end: import Obsidian/Markdown notes, grant a scoped session, read through Memory Guard, inspect the audit log, and revoke. MCP integration and a browser consent UI are the next milestone. This is not production-ready yet.
+
 ---
 
 <h2 id="english">English</h2>
 
-### What is UOMP?
+### What UOMP is
 
-**UOMP (User-Owned Memory Protocol)** is an open protocol that lets users keep their personal memory data on their own device while granting AI Agents temporary, scoped, and auditable access through short-lived **Capability Tokens**.
+UOMP is the missing layer between a user's personal context and the agents that want to use it.
 
-This repository is the reference TypeScript implementation of the protocol draft.
+Today, an agent that needs your notes, preferences, portfolio, or calendar has two bad options:
 
-### Why it matters
+1. Ask you to upload everything to its vendor's cloud.
+2. Ask for a long-lived, over-scoped API key.
 
-AI Agents need rich personal context to be useful. Today that context is usually obtained by either:
+Both are all-or-nothing. There is no standard way to say:
 
-- Uploading everything to a centralized cloud, or
-- Handing over long-lived API keys with too much scope.
+> "Read these notes for 30 minutes. Not those. Show me what you read. Stop now."
 
-Both break user sovereignty. UOMP proposes a third path:
+UOMP makes that sentence executable.
 
-> **Your memory stays on your device. Agents receive only the minimum, temporary access you explicitly authorize.**
+### Why now
 
-### Features
+- **MCP is standardizing how agents connect to tools and data** — but it does not define who is allowed to read what, for how long, or how to revoke it.
+- **Personal context is fragmenting** across ChatGPT, Claude, Cursor, and vertical agents. Every app wants its own memory.
+- **Memory vendors optimize recall.** Very few optimize user consent, least privilege, and audit across agents.
 
-- **Local-first memory store** — SQLite-based storage under `~/.uomp`, with a pluggable `IMemoryStore` abstraction.
-- **Agent manifest (`uom.json`)** — Agents declare requested scopes (tags/keys) upfront.
-- **Interactive authorization** — The CLI shows the manifest and lets the user approve a scoped session.
-- **JWT Capability Tokens** — EdDSA-signed tokens bound to a session, injected via `UOM_TOKEN`.
-- **Memory Guard** — Filters every request against the granted scope and logs all access.
-- **SDK (`@uomp/sdk`)** — `UompClient` with sub-clients for memory, aggregate, payload, session, audit, and auth.
-- **Aggregate queries** — `sum`/`avg`/`count`/`min`/`max` without exposing raw data.
-- **Deletion proof** — Agents submit cryptographic proof of data deletion before session close.
-- **Remote Authorization Gateway** — Exposes the Memory Guard over mTLS + Cloudflare Tunnel for remote Agents.
-- **Wallet authentication** — Browser-based auth via MetaMask (Ethereum) and Argent X (Starknet), with PBKDF2 key derivation.
-- **Browser dashboard** — Zero-install portfolio manager with Dropbox sync and Agent analysis.
-- **Cloud Relay** — Stateless public relay for token validation, rate-limiting, and ciphertext forwarding.
-- **Store abstraction** — `IMemoryStore` interface with SQLite, encrypted object, and S3 backends.
+The opportunity is not another memory store. It is the control plane for memory access.
 
-### Architecture
+### What UOMP is — and what it isn't
 
-Three modes, three independent paths — all converge at the same Guard + Memory Store.
+| UOMP is | UOMP is not |
+|---|---|
+| A local consent, authorization, and audit layer | A new memory database or vector store |
+| A way to govern access to memory you already have | A replacement for Mem0, Letta, Obsidian, or Notion |
+| An open protocol plus a reference implementation | A model, agent framework, or cloud |
+| Session-based, revocable, and auditable | A blockchain or FHE product today |
+| Complementary to MCP | A marketplace or agent registry |
 
-**Mode 1 — Browser** (zero install, wallet-powered)
+The core idea: **don't move the data; govern access to it.**
 
-```
-  Wallet sign ──→ encryption key ──→ Dropbox (encrypted data)
-       │
-  Browser Dashboard ──→ Gateway ──→ Guard ──→ Memory Store
-       ↑                                  │
-  Agent report ←────────────────── audit log
-```
+The name "User-Owned Memory Protocol" is historical. The value is the control plane, not a new storage format.
 
-The wallet signature derives an encryption key. Data stored in Dropbox is ciphertext — the server never sees plaintext. The browser calls Guard through Gateway, same as any other Agent.
+### Product thesis
 
-**Mode 2 — Local CLI** (Agent runs alongside Guard)
+1. Users will adopt a consent layer only if it gives them something useful immediately — not because it is a protocol.
+2. The first useful thing is: **connect the memory you already have to the agents you already use, with control.**
+3. Start with one user, one source, and one agent. Expand only after retention.
 
-```
-  pnpm cli authorize ──→ Auth Service ──→ issues UOM_TOKEN
-                                               │
-  Agent process ←──────────────────────────────┘
-       │
-       ├──→ Guard (scope filter) ──→ Memory Store
-       │         │
-       │    audit log
-       │
-       └──→ submitDeletionProof ──→ session closed
-```
+North star:
 
-CLI authorizes, Auth issues a scoped JWT. Agent runs as independent process with the token in its environment. Every read goes through Guard which enforces scope and logs access.
+> Make it normal for a user to say: "This agent can read this part of my memory, for this task, for 30 minutes — and I can see and revoke it."
 
-**Mode 3 — Remote** (Gateway + Cloudflare Tunnel)
+### The first real use case
+
+**Give Claude Desktop or Cursor temporary access to your Obsidian vault.**
+
+1. Import a local folder into UOMP: `uomp import ~/Obsidian/MyVault`.
+2. The agent asks for scopes: "read project notes, not my personal journal."
+3. You approve for 30 minutes in the CLI.
+4. The agent reads through Memory Guard. Every access is logged.
+5. You revoke. The next request fails with `403`.
+
+The Markdown/Obsidian import and CLI consent loop now work end-to-end. Native Claude Desktop / Cursor support still requires the MCP server, which is the next milestone, along with a browser consent UI.
+
+### How it works
 
 ```
-  pnpm cli authorize ──→ Auth ──→ UOM_TOKEN (saved to .env)
-                                    │
-  uomp gateway start ←──────────────┘
-       │
-  Cloudflare Tunnel ──→ public URL (https://xxx.trycloudflare.com)
-       │
-  Remote Agent ──→ POST /v1/memory/read ──→ Gateway ──→ Guard ──→ Store
-                                                        │
-                                                   audit log
+Agent (MCP client or SDK)
+   │  uom.json: declares the scopes it wants
+   ▼
+Auth Service ── issues a short-lived capability token
+   │
+   ▼
+Memory Guard ── checks session status, scope, expiry, and revocation
+   │
+   ├── existing memory source (SQLite, files, Obsidian, vector DB adapter)
+   └── audit log
 ```
 
-One command to go public. Remote Agent connects through the tunnel URL with the same Token-based auth.
+Design principles:
+
+- **Local-first by default.** Guard listens on `127.0.0.1`; data does not leave the machine unless remote access is explicitly enabled.
+- **Least privilege.** Scopes are expressed as tags, keys, and fields — not "all memory."
+- **Session-bound.** Tokens expire; `revoke` and `close` take effect on the next request.
+- **Auditable.** Every access decision is logged.
+- **Interoperable.** UOMP is a layer over existing memory sources, not a new silo.
+
+### What works today
+
+| Capability | Status |
+|---|---|
+| Local memory store | SQLite; CSV/JSON and Obsidian/Markdown import |
+| Local knowledge import | Markdown folders; frontmatter tags; path-derived scopes; `--dry-run` |
+| Agent manifest | `uom.json` with requested scopes |
+| Authorization | CLI, with tag/key/field scopes and deny lists |
+| Capability tokens | EdDSA-signed JWT, 30-minute default |
+| Enforcement | Memory Guard: scope filtering, aggregation, audit log |
+| Revocation | `revoke` / `close` invalidate the next request |
+| Remote access | Gateway with mTLS and Cloudflare Tunnel |
+| SDK | TypeScript (`@uomp/sdk`) |
+| Examples | Calendar agent and stock analyst |
+| Writes | Not available in the MVP; writes return `503` |
+| Admin operations | Session create/grant/revoke require a local admin token |
+
+### What we are building next
+
+1. **MCP server** — Claude Desktop, Cursor, and other MCP clients can connect without a custom SDK.
+2. **Installable CLI** — one-command install and upgrade, without cloning the repo.
+3. **Consent UI** — browser-based grant/revoke, scope preview, and audit timeline. Not CLI-only.
+4. **More local connectors** — beyond Obsidian/Markdown.
+5. **Python SDK** — meet agent developers where most agents are built.
+6. **Design partner program** — 10 users with a real weekly workflow.
+
+### How we will measure the first milestone
+
+- 10 design partners using UOMP with their own data.
+- 3+ agents connected per user.
+- 3+ uses per week for 4 consecutive weeks.
+- Time to first authorized read under 5 minutes.
+- At least 50% of users revoke a session — control must be felt, not just claimed.
+
+If these numbers do not hold, we change the workflow, not add features.
+
+### Not on the critical path
+
+These are experiments or research directions, not the current product roadmap:
+
+- FHE (homomorphic encryption)
+- On-chain audit
+- Wallet authentication and the Dropbox browser dashboard
+- New storage backends (S3/IPFS)
+- Agent registry/marketplace
+- Agent write workflows
+
+They remain in the repository and design docs, but we will not let them delay the first retained-user workflow. See [`docs/on-chain-audit-design.md`](docs/on-chain-audit-design.md) and [`docs/store-abstraction-design.md`](docs/store-abstraction-design.md) for the research context.
 
 ### Quick start
 
-**Requirements**
-
-- Node.js >= 22
-- pnpm 9 (`corepack enable` or `npm install -g pnpm@9`)
-
-**Install & build**
+Requirements: Node.js >= 22 and pnpm 9.
 
 ```bash
 pnpm install
 pnpm build
-```
-
-**Initialize the data directory**
-
-```bash
 pnpm cli init
 ```
 
-This creates `~/.uomp/` with SQLite stores, config, and an Ed25519 key pair for signing tokens.
+> In this repository the CLI runs as `pnpm cli`. If you install it globally, the same commands are available as `uomp ...`.
 
-**Run the example Agent**
+**Import an Obsidian / Markdown vault**
+
+```bash
+pnpm cli import ~/Obsidian/MyVault
+pnpm cli import ~/Obsidian/MyVault --dry-run
+```
+
+Directory paths become scopes: `projects/uomp/plan.md` is tagged `notes`, `notes/projects`, and `notes/projects/uomp`. Frontmatter `tags`, `title`, and `sensitivity` are preserved.
+
+**Authorize an agent**
+
+```bash
+pnpm cli authorize ./examples/calendar-agent --scope preference
+```
+
+This starts the local Auth + Guard server, creates a 30-minute session, and writes the token to `~/.uomp/sessions/<sessionId>.env` with mode `0600`. It prints the exact `source` command and the revoke command. The full token is not printed by default.
+
+**Run the agent in a second terminal**
+
+```bash
+source ~/.uomp/sessions/<sessionId>.env
+node ./examples/calendar-agent/index.js
+```
+
+Keep the `authorize` terminal open while the agent runs. Use `pnpm cli sessions` to see active sessions and `pnpm cli revoke <sessionId>` to invalidate one immediately.
+
+If you prefer to run the server separately:
+
+```bash
+# Terminal 1
+pnpm cli serve
+
+# Terminal 2
+pnpm cli authorize ./examples/calendar-agent --scope preference --no-server
+
+# Terminal 3
+source ~/.uomp/sessions/<sessionId>.env
+node ./examples/calendar-agent/index.js
+```
+
+**Sensitive-data demo: stock analyst**
+
+```bash
+pnpm cli import ./examples/stock-analyst/sample-risk.json --replace
+pnpm cli import ./examples/stock-analyst/sample-holdings.csv \
+  --tag portfolio:holdings --sensitivity high --replace
+
+pnpm cli authorize ./examples/stock-analyst \
+  --scope portfolio:holdings profile:risk
+
+# In a second terminal, source the env file printed above, then run:
+source ~/.uomp/sessions/<sessionId>.env
+node ./examples/stock-analyst/index.js
+```
+
+**Developer shortcut**
 
 ```bash
 pnpm cli agent run ./examples/calendar-agent
-```
-
-### Usage modes
-
-#### Standard mode (recommended)
-
-The CLI only handles authorization; the Agent runs as an independent process.
-
-```bash
-# Terminal 1: start Auth + Guard
-pnpm --filter @uomp/server start
-
-# Terminal 2: authorize and get a token
-pnpm cli authorize ./examples/calendar-agent
-
-# Terminal 2: run the Agent independently
-export UOM_TOKEN="<token>"
-export UOMP_BASE_URL="http://127.0.0.1:9374"
-node ./examples/calendar-agent/index.js
 ```
 
 > Admin operations (`createSession`, `grant`, `revoke`) require the local admin token stored at `~/.uomp/.secrets/admin-token`. The Node SDK only reads `UOMP_ADMIN_TOKEN` when the base URL is loopback.
 
-#### Local development shortcut
+### Security model
 
-```bash
-pnpm cli agent run ./examples/calendar-agent
-```
+UOMP enforces:
 
-This bundles authorization, Guard startup, and Agent launch into one command.
+- the token's tag/key/field scope;
+- session expiry;
+- immediate revocation after `revoke` or `close`;
+- an audit record for every request.
 
-#### Remote mode via Gateway
+UOMP does **not** protect against:
 
-Use the Gateway when the Agent runs outside your local machine. One command, no public IP required:
+- a malicious process running as the same OS user (it can read `~/.uomp` and the admin token);
+- an authorized agent retaining plaintext it received;
+- a compromised user machine;
+- a malicious agent that ignores the scopes it was granted.
 
-```bash
-# Start Gateway + Cloudflare Tunnel (auto-exposes public URL)
-uomp gateway start
-
-# Output:
-# ═══ Public Gateway URL ═══
-#   https://xxx.trycloudflare.com
-# export UOMP_BASE_URL="https://xxx.trycloudflare.com"
-
-# Authorize a remote Agent
-pnpm cli authorize ./examples/stock-analyst --scope portfolio:holdings profile:risk --output /tmp/uomp.env
-source /tmp/uomp.env
-
-# The Agent can now connect from anywhere.
-# Or use the hosted DO Agent:
-# curl -X POST https://uomp-stock-analyst-mvblm.ondigitalocean.app/analyze \
-#   -H 'Content-Type: application/json' \
-#   -d '{"token":"$UOM_TOKEN","gateway_url":"$UOMP_BASE_URL"}'
-```
-
-**Without tunnel** (manual Gateway only):
-
-```bash
-node apps/gateway/dist/index.js                          # Gateway only
-uomp gateway start --no-tunnel                           # or via CLI
-```
-
-See `apps/gateway/README.md` for full configuration options.
+This is why the project does not claim "trustless." The goal is **informed consent, least privilege, revocation, and audit** — not a guarantee that an authorized agent forgets what it saw.
 
 ### Project structure
 
 ```
-uomp-mvp/
-├── packages/
-│   ├── core/          # Shared types and constants
-│   ├── store/         # SQLite Memory Store (pluggable IMemoryStore)
-│   ├── token/         # EdDSA JWT issuance and verification
-│   ├── identity/      # DID / GPG / Wallet identity verification
-│   ├── registry/      # ERC-8004 Registry client
-│   ├── auth/          # Auth Service HTTP API
-│   ├── guard/         # Memory Guard HTTP API
-│   ├── sdk/           # Agent TypeScript SDK (UompClient + BrowserSDK)
-│   └── cli/           # uomp command-line tool
-├── apps/
-│   ├── server/        # Combined Auth + Guard service
-│   ├── gateway/       # Remote Authorization Gateway (mTLS + Cloudflare Tunnel)
-│   └── relay/         # Stateless Cloud Relay (token validation + rate limiting)
-├── examples/
-│   ├── calendar-agent/# Example calendar Agent
-│   ├── stock-analyst/ # Multi-dimensional stock analysis Agent
-│   └── browser-dashboard/ # Zero-install portfolio dashboard
-└── specs/
-    └── draft-00.md    # Protocol specification
+packages/
+  core/       shared types and constants
+  store/      memory store and adapter interfaces
+  token/      capability token issuance and verification
+  auth/       session and admin authorization
+  guard/      scope enforcement and audit
+  sdk/        TypeScript client
+  cli/        `uomp` command-line tool
+apps/
+  server/     combined Auth + Guard service
+  gateway/    remote access (mTLS + tunnel)
+  relay/      stateless relay (preview)
+examples/
+  calendar-agent/
+  stock-analyst/
+  browser-dashboard/  (preview)
+specs/
+  draft-00.md
 ```
 
-### Creating your own Agent
+### Get involved
 
-```
-my-agent/
-├── uom.json      # Agent manifest
-└── index.js      # Agent entry point
-```
+We are looking for **10 design partners** who:
 
-**`uom.json`**
+- use at least two AI agents regularly;
+- keep personal or project knowledge in local files, Obsidian, or a similar tool;
+- are willing to try a weekly workflow and give direct feedback.
 
-```json
-{
-  "uomp_version": "1.0",
-  "agent": {
-    "id": "my-agent",
-    "name": "My Agent",
-    "version": "0.1.0",
-    "description": "An example agent",
-    "publisher": "me"
-  },
-  "requested_scopes": {
-    "read": {
-      "tags": ["preference"],
-      "deny_tags": ["private"]
-    }
-  },
-  "required_capabilities": ["memory.read"]
-}
-```
+Open an issue or read the protocol draft:
 
-**`index.js`**
+- [Issues](https://github.com/0xSynapse/uomp-core/issues)
+- [Protocol draft](https://www.uomp.org/spec/)
 
-```javascript
-import { UompClient } from '@uomp/sdk';
+### License
 
-const uomp = UompClient.fromEnv();
-
-const preferences = await uomp.memory.getByTag('preference');
-console.log(preferences);
-```
-
-Run it:
-
-```bash
-pnpm cli agent run ./my-agent
-```
-
-### Security model
-
-1. **Agent declares** the requested scope in `uom.json`.
-2. **User authorizes** via the local CLI, optionally after identity verification.
-3. **Auth Service** issues a session-bound JWT with the granted scope.
-4. **Memory Guard** validates the token, filters every request, and writes an audit log.
-
-MVP defaults are intentionally conservative:
-
-- Tokens expire after 30 minutes.
-- Write operations return `503 WRITE_NOT_AVAILABLE`.
-- Identity verification is optional and shows a warning if missing.
-
-### Status & roadmap
-
-- [x] Draft-00 spec
-- [x] Local SQLite Memory Store
-- [x] JWT Capability Token (EdDSA)
-- [x] Auth Service + Memory Guard
-- [x] CLI with interactive authorization
-- [x] SDK (`@uomp/sdk`) with `UompClient`
-- [x] Aggregate queries + deletion proof
-- [x] Remote Authorization Gateway + Cloudflare Tunnel
-- [x] Cloud Relay
-- [x] Wallet auth + Browser Dashboard
-- [x] Store abstraction (`IMemoryStore`)
-- [x] Example Agents (calendar + stock analyst)
-- [ ] Agent write staging & approval flow
-- [ ] On-chain audit (authorization, revocation, access events)
-- [ ] FHE integration (agent computes on ciphertext, never sees plaintext)
-- [ ] Semantic retrieval (`query` endpoint)
-- [ ] Production-grade multi-backend support
-
-### Ultimate vision: FHE + On-chain Audit
-
-Today: you authorize an agent, it reads your plaintext data, it could remember it. You trust the agent.
-
-**Endgame**: Fully Homomorphic Encryption. Your data is encrypted before it leaves your machine. The agent reads **ciphertext**, runs analysis on **ciphertext**, outputs **ciphertext results**. Only you decrypt the results. The agent can keep the ciphertext forever — without your private key, it's garbage.
-
-```
-Today:                             Endgame:
-  plaintext → Agent                ciphertext → Agent
-  Agent may remember               Agent cannot decrypt
-  Trust required                   Trustless by math
-```
-
-Combined with on-chain audit (Phase 4-5), this creates a full trustless lifecycle:
-
-```
-User encrypts → Agent computes on ciphertext → results decrypted by user
-     ↓                          ↓                          ↓
-  Chain: Authorization      Chain: Access           Chain: zkFHE proof
-  (scopes, fhe_mode)        (tag, ciphertext)       (computation verified)
-```
-
-When both are in place, UOMP achieves its original promise: **your data, your rules, verifiable by anyone, trusted by no one.**
-
-Read the full design: [docs/on-chain-audit-design.md](docs/on-chain-audit-design.md)
-
-### Links
-
-- Protocol website: https://www.uomp.org
-- Spec: https://www.uomp.org/spec/
-- Protocol discussions: https://github.com/0xaicrypto/uomp
-- Reference implementation issues: https://github.com/0xaicrypto/uomp-core/issues
+Apache 2.0. See [`LICENSE`](LICENSE).
 
 ---
 
 <h2 id="中文">中文</h2>
 
-### UOMP 是什么？
+### UOMP 是什么
 
-**UOMP（User-Owned Memory Protocol，用户主权记忆协议）** 是一个开放协议草案，让用户能够将个人记忆数据保留在自己的设备上，同时通过短期的 **Capability Token** 向 AI Agent 授予临时、限定范围且可审计的访问权限。
+**UOMP 是用户和 AI Agent 之间的授权、撤销与审计层。**
 
-本仓库是 UOMP 协议的 TypeScript 参考实现。
+你的记忆留在原来的地方。Agent 只获得临时、限定范围、可撤销的访问权限，并且你能看到它到底读了什么。
 
-### 为什么重要
+今天，一个需要你的笔记、偏好、持仓或日历的 Agent，通常只有两个选择：
 
-AI Agent 需要丰富的个人上下文才能提供有用服务。目前通常有两种方式：
+1. 让你把所有数据上传到它的云端；
+2. 向你要一个长期、过宽的 API key。
 
-- 把所有数据上传到中心化云端；
-- 给 Agent 长期、过度授权的 API key。
+两者都是“全有或全无”。用户没有一个标准方式表达：
 
-这两种方式都让用户失去控制权。UOMP 提出第三条路径：
+> “这 30 分钟可以读这些笔记，不能读那些；告诉我你读了什么；现在停止。”
 
-> **你的记忆留在你的设备上；Agent 只获得你明确授权的最小、临时访问权限。**
+UOMP 就是让这句话可执行的那一层。
 
-### 特性
+### 为什么是现在
 
-- **本地优先的记忆存储** — 基于 SQLite，默认存放在 `~/.uomp`，支持可插拔的 `IMemoryStore` 抽象。
-- **Agent 声明文件 `uom.json`** — Agent 事先声明请求的读取范围（tags/keys）。
-- **交互式授权** — CLI 展示 Agent 声明，用户确认后生成限定范围的会话。
-- **JWT Capability Token** — 使用 EdDSA 签名，通过 `UOM_TOKEN` 注入 Agent。
-- **Memory Guard** — 按授权范围过滤每次请求，并记录审计日志。
-- **SDK（`@uomp/sdk`）** — `UompClient` 提供 memory、aggregate、payload、session、audit、auth 子客户端。
-- **聚合查询** — `sum`/`avg`/`count`/`min`/`max`，不暴露原始数据。
-- **删除证明** — Agent 在关闭会话前提交密码学删除证明。
-- **远程授权 Gateway** — 通过 mTLS + Cloudflare Tunnel 暴露 Memory Guard 给远程 Agent。
-- **钱包认证** — 浏览器端通过 MetaMask（Ethereum）和 Argent X（Starknet）认证，PBKDF2 密钥派生。
-- **浏览器 Dashboard** — 零安装的组合管理器，支持 Dropbox 同步和 Agent 分析。
-- **Cloud Relay** — 无状态公共中继，验证 Token、限流、密文转发。
-- **Store 抽象** — `IMemoryStore` 接口，支持 SQLite、加密对象、S3 后端。
+- **MCP 正在标准化 Agent 连接工具和数据的方式**，但它没有定义“谁可以读什么、读多久、如何撤销”。
+- **个人上下文正在分裂**：ChatGPT、Claude、Cursor 和垂直 Agent 各存一份记忆。
+- **记忆厂商优化的是召回率**，很少有人优化跨 Agent 的用户同意、最小权限和审计。
 
-### 架构
+机会不是再做一个记忆库，而是做记忆访问的控制面。
 
-三种模式，三条独立路径 —— 最终汇聚到同一套 Guard + Memory Store。
+### UOMP 是什么，不是什么
 
-**模式一 — 浏览器**（零安装，钱包驱动）
+| UOMP 是 | UOMP 不是 |
+|---|---|
+| 本地授权、撤销与审计层 | 新的记忆数据库或向量库 |
+| 治理你已有记忆的访问方式 | Mem0、Letta、Obsidian、Notion 的替代品 |
+| 开放协议 + 参考实现 | 模型、Agent 框架或云服务 |
+| 基于会话、可撤销、可审计 | 今天的区块链或 FHE 产品 |
+| MCP 的补充层 | Agent 市场或 Registry |
 
-```
-  钱包签名 ──→ 加密密钥 ──→ Dropbox（密文存储）
-       │
-  浏览器 Dashboard ──→ Gateway ──→ Guard ──→ Memory Store
-       ↑                                  │
-  Agent 报告 ←────────────────── 审计日志
-```
+核心思想：**不要搬数据，治理对数据的访问。**
 
-钱包签名派生出加密密钥。存入 Dropbox 的数据全是密文，服务器看不到明文。浏览器和 Agent 一样通过 Gateway 调用 Guard。
+“User-Owned Memory Protocol”这个名字是历史产物。真正的价值在控制面，而不是新的存储格式。
 
-**模式二 — 本地 CLI**（Agent 与 Guard 同机运行）
+### 产品判断
 
-```
-  pnpm cli authorize ──→ Auth Service ──→ 签发 UOM_TOKEN
-                                               │
-  Agent 进程 ←─────────────────────────────────┘
-       │
-       ├──→ Guard（范围过滤）──→ Memory Store
-       │         │
-       │    审计日志
-       │
-       └──→ submitDeletionProof ──→ 会话关闭
-```
+1. 用户只会采用一个授权层，前提是它立刻带来实际价值——而不是因为它是一个协议。
+2. 第一个实际价值是：**把你已经有的记忆，接给你已经在用的 Agent，并且保持控制。**
+3. 先做一个用户、一个数据源、一个 Agent。留存成立后再扩展。
 
-CLI 授权，Auth 签发限定范围的 JWT。Agent 作为独立进程运行，Token 通过环境变量注入。每次读取都经过 Guard 校验范围并记录审计。
+北极星：
 
-**模式三 — 远程**（Gateway + Cloudflare Tunnel）
+> 让用户习惯说：“这个 Agent 可以为这次任务读这部分记忆，30 分钟，我能看见，也能随时撤销。”
+
+### 第一个真实场景
+
+**让 Claude Desktop 或 Cursor 临时访问你的 Obsidian 笔记库。**
+
+1. 用 `uomp import ~/Obsidian/MyVault` 导入一个本地目录，或接入已有的记忆源。
+2. Agent 声明范围：“读项目笔记，不读私人日记。”
+3. 你在 CLI 里批准 30 分钟。
+4. Agent 通过 Memory Guard 读取，每次访问都有日志。
+5. 你撤销，下一个请求直接 `403`。
+
+Markdown/Obsidian 导入和 CLI 授权闭环现在已经跑通。要让 Claude Desktop / Cursor 原生接入，还需要 MCP server；这是下一个里程碑，浏览器授权界面也在同一阶段。
+
+### 工作方式
 
 ```
-  pnpm cli authorize ──→ Auth ──→ UOM_TOKEN（存入 .env）
-                                    │
-  uomp gateway start ←──────────────┘
-       │
-  Cloudflare Tunnel ──→ 公网地址（https://xxx.trycloudflare.com）
-       │
-  远程 Agent ──→ POST /v1/memory/read ──→ Gateway ──→ Guard ──→ Store
-                                                        │
-                                                   审计日志
+Agent（MCP 客户端或 SDK）
+   │  uom.json：声明它想要的范围
+   ▼
+Auth Service ── 签发短期 Capability Token
+   │
+   ▼
+Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
+   │
+   ├── 已有的记忆源（SQLite、文件、Obsidian、向量库适配器）
+   └── 审计日志
 ```
 
-一条命令暴露公网。远程 Agent 通过隧道 URL 连接，使用同样的 Token 鉴权。
+设计原则：
+
+- **默认本地优先。** Guard 监听 `127.0.0.1`；除非显式开启远程访问，数据不离开本机。
+- **最小权限。** 范围用 tags、keys、fields 表达，而不是“全部记忆”。
+- **会话绑定。** Token 会过期；`revoke` / `close` 在下一个请求立即生效。
+- **可审计。** 每次访问决策都有日志。
+- **可互操作。** UOMP 是已有记忆源之上的一层，不是新的数据孤岛。
+
+### 今天已经可用
+
+| 能力 | 状态 |
+|---|---|
+| 本地记忆存储 | SQLite，支持 CSV/JSON 和 Obsidian/Markdown 导入 |
+| 本地知识导入 | Markdown 目录、frontmatter tags、按路径生成范围、`--dry-run` |
+| Agent 声明 | `uom.json`，声明请求范围 |
+| 授权 | CLI，支持 tag/key/field 范围和 deny 列表 |
+| Capability Token | EdDSA 签名 JWT，默认 30 分钟 |
+| 执行 | Memory Guard：范围过滤、聚合、审计日志 |
+| 撤销 | `revoke` / `close` 后下一个请求失效 |
+| 远程访问 | Gateway + mTLS + Cloudflare Tunnel |
+| SDK | TypeScript（`@uomp/sdk`） |
+| 示例 | Calendar Agent、Stock Analyst |
+| 写入 | MVP 不支持，写入返回 `503` |
+| 管理员操作 | create/grant/revoke 需要本机管理员令牌 |
+
+### 下一步做什么
+
+1. **MCP server**：Claude Desktop、Cursor 等 MCP 客户端可以直接接入，不需要自定义 SDK。
+2. **可安装的 CLI**：一条命令安装和升级，不需要 clone 仓库。
+3. **授权界面**：浏览器里完成授权/撤销、范围预览、审计时间线，不再只靠 CLI。
+4. **更多本地连接器**：在 Obsidian/Markdown 之外继续扩展。
+5. **Python SDK**：去 Agent 开发者最多的地方。
+6. **设计伙伴计划**：10 个有真实每周工作流的用户。
+
+### 第一个里程碑怎么衡量
+
+- 10 个设计伙伴用自己的数据使用 UOMP。
+- 每个用户连接 3 个以上 Agent。
+- 连续 4 周、每周使用 3 次以上。
+- 首次授权到第一次读取的时间小于 5 分钟。
+- 至少 50% 的用户使用过撤销——控制权必须被真实感受到。
+
+如果这些数字不成立，就换场景，不要加功能。
+
+### 不在当前主线上
+
+以下是实验或研究方向，不是当前产品路线图：
+
+- FHE（全同态加密）
+- 链上审计
+- 钱包登录和 Dropbox 浏览器 Dashboard
+- 新的存储后端（S3/IPFS）
+- Agent Registry / 市场
+- Agent 写入流程
+
+它们会留在仓库和设计文档里，但不会拖慢第一个留存闭环。研究背景见 [`docs/on-chain-audit-design.md`](docs/on-chain-audit-design.md) 和 [`docs/store-abstraction-design.md`](docs/store-abstraction-design.md)。
 
 ### 快速开始
 
-**环境要求**
-
-- Node.js >= 22
-- pnpm 9（通过 `corepack enable` 或 `npm install -g pnpm@9` 安装）
-
-**安装并构建**
+环境要求：Node.js >= 22，pnpm 9。
 
 ```bash
 pnpm install
 pnpm build
-```
-
-**初始化数据目录**
-
-```bash
 pnpm cli init
 ```
 
-该命令会在 `~/.uomp/` 创建 SQLite 数据库、配置文件以及用于签发 Token 的 Ed25519 密钥对。
+> 在仓库里通过 `pnpm cli` 运行；全局安装后，同样的命令是 `uomp ...`。
 
-**运行示例 Agent**
+**导入 Obsidian / Markdown 笔记库**
+
+```bash
+pnpm cli import ~/Obsidian/MyVault
+pnpm cli import ~/Obsidian/MyVault --dry-run
+```
+
+目录路径会变成授权范围：`projects/uomp/plan.md` 会带上 `notes`、`notes/projects`、`notes/projects/uomp` 三个 tag。Frontmatter 里的 `tags`、`title`、`sensitivity` 会保留。
+
+**授权一个 Agent**
+
+```bash
+pnpm cli authorize ./examples/calendar-agent --scope preference
+```
+
+这条命令会启动本地 Auth + Guard server，创建 30 分钟会话，并把 token 写入 `~/.uomp/sessions/<sessionId>.env`（权限 `0600`）。它会打印需要执行的 `source` 命令和撤销命令；默认不打印完整 token。
+
+**在第二个终端运行 Agent**
+
+```bash
+source ~/.uomp/sessions/<sessionId>.env
+node ./examples/calendar-agent/index.js
+```
+
+Agent 运行期间保持 `authorize` 终端打开。`pnpm cli sessions` 查看活跃会话，`pnpm cli revoke <sessionId>` 立即撤销。
+
+如果你想分开运行 server：
+
+```bash
+# 终端 1
+pnpm cli serve
+
+# 终端 2
+pnpm cli authorize ./examples/calendar-agent --scope preference --no-server
+
+# 终端 3
+source ~/.uomp/sessions/<sessionId>.env
+node ./examples/calendar-agent/index.js
+```
+
+**高敏感数据示例：Stock Analyst**
+
+```bash
+pnpm cli import ./examples/stock-analyst/sample-risk.json --replace
+pnpm cli import ./examples/stock-analyst/sample-holdings.csv \
+  --tag portfolio:holdings --sensitivity high --replace
+
+pnpm cli authorize ./examples/stock-analyst \
+  --scope portfolio:holdings profile:risk
+
+# 在第二个终端 source 上面打印的 env 文件，然后运行：
+source ~/.uomp/sessions/<sessionId>.env
+node ./examples/stock-analyst/index.js
+```
+
+**开发者快捷方式**
 
 ```bash
 pnpm cli agent run ./examples/calendar-agent
-```
-
-### 使用方式
-
-#### 方式一：标准模式（推荐）
-
-CLI 只负责授权，Agent 作为独立进程运行。
-
-```bash
-# 终端 1：启动 Auth + Guard 服务
-pnpm --filter @uomp/server start
-
-# 终端 2：为示例 Agent 授权并获取 Token
-pnpm cli authorize ./examples/calendar-agent
-
-# 终端 2：独立启动 Agent
-export UOM_TOKEN="<token>"
-export UOMP_BASE_URL="http://127.0.0.1:9374"
-node ./examples/calendar-agent/index.js
 ```
 
 > 管理员操作（`createSession`、`grant`、`revoke`）需要本机管理员令牌，默认存放在 `~/.uomp/.secrets/admin-token`。Node SDK 仅在 base URL 为 loopback 时读取 `UOMP_ADMIN_TOKEN`。
 
-#### 方式二：本地开发 shortcut
+### 安全模型
 
-```bash
-pnpm cli agent run ./examples/calendar-agent
-```
+UOMP 会强制执行：
 
-该命令把授权、启动 Guard、启动 Agent 打包在一起，仅适用于本地开发测试。
+- Token 的 tag/key/field 范围；
+- 会话过期；
+- `revoke` / `close` 后立即失效；
+- 每次请求的审计记录。
 
-#### 方式三：远程模式（Gateway + Cloudflare Tunnel）
+UOMP 不能防护：
 
-一条命令，无需公网 IP，将本地 Memory Guard 暴露给任意远程 Agent：
+- 以同一 OS 用户运行的恶意进程（它可以读 `~/.uomp` 和管理员令牌）；
+- 被授权的 Agent 保留它收到的明文；
+- 被攻陷的用户机器；
+- 无视授权范围的恶意 Agent。
 
-```bash
-# 启动 Gateway + 自动反代隧道
-uomp gateway start
-
-# 输出：
-# ═══ Public Gateway URL ═══
-#   https://xxx.trycloudflare.com
-# export UOMP_BASE_URL="https://xxx.trycloudflare.com"
-
-# 授权远程 Agent
-pnpm cli authorize ./examples/stock-analyst --scope portfolio:holdings profile:risk --output /tmp/uomp.env
-source /tmp/uomp.env
-
-# 调用已部署的 DO Agent：
-curl -X POST https://uomp-stock-analyst-mvblm.ondigitalocean.app/analyze \
-  -H 'Content-Type: application/json' \
-  -d '{"token":"$UOM_TOKEN","gateway_url":"$UOMP_BASE_URL"}'
-```
-
-详见 `apps/gateway/README.md`。
+所以这个项目不会宣称“trustless”。目标是 **知情同意、最小权限、可撤销、可审计**，而不是保证被授权的 Agent 会忘记它看到过什么。
 
 ### 项目结构
 
 ```
-uomp-mvp/
-├── packages/
-│   ├── core/          # 共享类型和常量
-│   ├── store/         # SQLite Memory Store（可插拔 IMemoryStore）
-│   ├── token/         # EdDSA JWT 签发与验证
-│   ├── identity/      # DID / GPG / 钱包 身份验证
-│   ├── registry/      # ERC-8004 Registry 客户端
-│   ├── auth/          # Auth Service HTTP API
-│   ├── guard/         # Memory Guard HTTP API
-│   ├── sdk/           # Agent TypeScript SDK（UompClient + BrowserSDK）
-│   └── cli/           # uomp 命令行工具
-├── apps/
-│   ├── server/        # Auth + Guard 组合服务
-│   ├── gateway/       # 远程授权 Gateway（mTLS + Cloudflare Tunnel）
-│   └── relay/         # 无状态 Cloud Relay（Token 验证 + 限流）
-├── examples/
-│   ├── calendar-agent/# 示例日历 Agent
-│   ├── stock-analyst/ # 多维股票分析 Agent
-│   └── browser-dashboard/ # 零安装组合管理 Dashboard
-└── specs/
-    └── draft-00.md    # 协议规范
+packages/
+  core/       共享类型和常量
+  store/      记忆存储和适配器接口
+  token/      Capability Token 签发与验证
+  auth/       会话与管理员授权
+  guard/      范围执行与审计
+  sdk/        TypeScript 客户端
+  cli/        `uomp` 命令行工具
+apps/
+  server/     Auth + Guard 组合服务
+  gateway/    远程访问（mTLS + 隧道）
+  relay/      无状态中继（预览）
+examples/
+  calendar-agent/
+  stock-analyst/
+  browser-dashboard/  （预览）
+specs/
+  draft-00.md
 ```
 
-### 创建自己的 Agent
+### 参与进来
 
-```
-my-agent/
-├── uom.json      # Agent 声明
-└── index.js      # Agent 入口
-```
+我们在找 **10 个设计伙伴**：
 
-**`uom.json` 示例**
+- 经常使用至少两个 AI Agent；
+- 个人或项目知识保存在本地文件、Obsidian 或类似工具里；
+- 愿意尝试一个每周工作流，并直接给反馈。
 
-```json
-{
-  "uomp_version": "1.0",
-  "agent": {
-    "id": "my-agent",
-    "name": "My Agent",
-    "version": "0.1.0",
-    "description": "An example agent",
-    "publisher": "me"
-  },
-  "requested_scopes": {
-    "read": {
-      "tags": ["preference"],
-      "deny_tags": ["private"]
-    }
-  },
-  "required_capabilities": ["memory.read"]
-}
-```
+欢迎开 issue 或阅读协议草案：
 
-**`index.js` 示例**
+- [Issues](https://github.com/0xSynapse/uomp-core/issues)
+- [协议草案](https://www.uomp.org/spec/)
 
-```javascript
-import { UompClient } from '@uomp/sdk';
+### License
 
-const uomp = UompClient.fromEnv();
-
-const preferences = await uomp.memory.getByTag('preference');
-console.log(preferences);
-```
-
-运行：
-
-```bash
-pnpm cli agent run ./my-agent
-```
-
-### 安全模型
-
-1. **Agent 声明**：在 `uom.json` 中声明请求范围。
-2. **用户授权**：通过本地 CLI 确认，可选进行身份验证。
-3. **签发 Token**：Auth Service 根据授权范围生成会话绑定的 JWT。
-4. **Guard 鉴权**：验证 Token、过滤请求、记录审计日志。
-
-MVP 默认采取保守策略：
-
-- Token 默认 30 分钟有效期。
-- 写入操作返回 `503 WRITE_NOT_AVAILABLE`。
-- 身份验证可选，缺失时 CLI 会显示警告。
-
-### 状态与路线图
-
-- [x] Draft-00 规范
-- [x] 本地 SQLite Memory Store
-- [x] JWT Capability Token（EdDSA）
-- [x] Auth Service + Memory Guard
-- [x] 交互式授权 CLI
-- [x] SDK（`@uomp/sdk`）含 `UompClient`
-- [x] 聚合查询 + 删除证明
-- [x] 远程授权 Gateway + Cloudflare Tunnel
-- [x] Cloud Relay
-- [x] 钱包认证 + 浏览器 Dashboard
-- [x] Store 抽象（`IMemoryStore`）
-- [x] 示例 Agent（calendar + stock analyst）
-- [ ] Agent 写入 staging/审批流程
-- [ ] 链上审计（授权、撤销、访问事件）
-- [ ] FHE 集成（Agent 在密文上计算，永远看不到明文）
-- [ ] 语义检索（`query` 接口）
-- [ ] 生产级多后端支持
-
-### 终极愿景：FHE + 链上审计
-
-现在：你授权 Agent，Agent 读明文数据，Agent 可以记住。你需要信任 Agent。
-
-**终局**：全同态加密。数据在离开你的设备前已经加密。Agent 读**密文**，在**密文**上分析，输出**密文**结果。只有你能解密结果。Agent 可以永远保留密文——没有你的私钥，它就是垃圾。
-
-```
-现在：                             终局：
-  明文 → Agent                     密文 → Agent
-  Agent 可能记住                   Agent 无法解密
-  需信任 Agent                     数学保证，无需信任
-```
-
-结合链上审计（Phase 4-5），形成完整的无信任闭环：
-
-```
-用户加密 → Agent 密文计算 → 用户解密结果
-   ↓               ↓              ↓
-链上：授权       链上：访问      链上：zkFHE
-(scopes, fhe)    (tag, 密文)     (计算验证)
-```
-
-两者兼备时，UOMP 兑现其原始承诺：**你的数据，你的规则，人人可验证，无需信任任何人。**
-
-完整设计文档：[docs/on-chain-audit-design.md](docs/on-chain-audit-design.md)
-
-### 链接
-
-- 协议网站：https://www.uomp.org
-- 规范：https://www.uomp.org/spec/
-- 协议讨论区：https://github.com/0xaicrypto/uomp
-- 本仓库 Issues：https://github.com/0xaicrypto/uomp-core/issues
+Apache 2.0，见 [`LICENSE`](LICENSE)。
