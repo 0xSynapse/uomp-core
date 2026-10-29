@@ -81,8 +81,6 @@ export class McpCommands {
   }
 
   async serve(options: McpOptions): Promise<void> {
-    await this.config.init();
-
     const credentials = await loadSessionCredentials(this.config, options.session);
     if (!credentials) {
       throw new Error(

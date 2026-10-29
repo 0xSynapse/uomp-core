@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -225,6 +225,23 @@ test('mcp fails clearly without a session', () => {
     const result = runCli(home, ['mcp']);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /No UOMP session/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('mcp --print-config works without initializing the data directory', () => {
+  const home = mkdtempSync(join(tmpdir(), 'uomp-cli-mcp-config-'));
+  const envPath = join(home, 'session.env');
+  writeFileSync(envPath, "export UOM_TOKEN='test-token'\nexport UOMP_BASE_URL='http://127.0.0.1:1'\n");
+
+  try {
+    const result = runCli(home, ['mcp', '--session', envPath, '--print-config']);
+    assert.equal(result.status, 0, result.stderr);
+
+    const config = JSON.parse(result.stdout);
+    assert.equal(config.mcpServers.uomp.args.at(-1), envPath);
+    assert.equal(existsSync(join(home, '.uomp')), false);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
