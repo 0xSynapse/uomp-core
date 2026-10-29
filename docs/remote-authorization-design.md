@@ -142,7 +142,7 @@ uomp discover https://agent.example.com/uom.json
 **MVP 推荐 mTLS HTTPS**：
 
 - Agent 在 Registry 中注册其 TLS 客户端证书或证书指纹。
-- 用户端 `uomp connect` 时验证 Agent 证书与 Registry 记录一致。
+- 用户端 `uomp connect` / `uomp inspect` 时验证 Agent 身份与 Registry 记录一致。
 - 后续授权协商与 Token 交付都在该双向 TLS 通道内进行。
 
 ### 4.4 DIDComm 迁移路线

@@ -141,7 +141,7 @@ Security requirements:
 **MVP recommendation: mTLS HTTPS**:
 
 - The Agent registers its TLS client certificate or certificate fingerprint in the Registry.
-- When the user runs `uomp connect`, the client verifies that the Agent certificate matches the Registry record.
+- When the user runs `uomp connect` / `uomp inspect`, the client verifies that the Agent identity matches the Registry record.
 - Subsequent authorization negotiation and Token delivery take place within this mutually authenticated TLS channel.
 
 ### 4.4 DIDComm Migration Roadmap

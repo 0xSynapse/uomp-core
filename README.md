@@ -20,7 +20,7 @@ Your memory stays where it is. Agents get temporary, scoped, revocable access �
   <a href="#english">English</a> | <a href="#中文">中文</a>
 </p>
 
-> **Status: early reference implementation, CLI-first.** The local loop works end-to-end: import Obsidian/Markdown notes, grant a scoped session, read through Memory Guard, inspect the audit log, and revoke. A stdio MCP server is available for early testing; Claude Desktop/Cursor validation and a packaged CLI are next. This is not production-ready yet.
+> **Status: early reference implementation, CLI-first.** The local loop works end-to-end: import Obsidian/Markdown notes, connect Claude Desktop/Cursor/OpenCode with one command, read through Memory Guard, inspect the audit log, and revoke. Claude Desktop/Cursor validation and a packaged CLI are next. This is not production-ready yet.
 
 ---
 
@@ -77,13 +77,12 @@ North star:
 
 **Give Claude Desktop or Cursor temporary access to your Obsidian vault.**
 
-1. Import a local folder into UOMP: `uomp import ~/Obsidian/MyVault`.
-2. The agent asks for scopes: "read project notes, not my personal journal."
-3. You approve for 30 minutes in the CLI.
-4. The agent reads through Memory Guard. Every access is logged.
-5. You revoke. The next request fails with `403`.
+1. Connect: `uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects`.
+2. UOMP imports the vault, starts the local server in the background, grants a 30-minute session, and writes the Claude Desktop MCP entry. Restart Claude Desktop.
+3. Ask Claude to read the project notes. Every access is logged.
+4. Revoke. The next request fails with `403`.
 
-The Markdown/Obsidian import and CLI consent loop now work end-to-end. A stdio MCP server is available for early testing; validating it with Claude Desktop and Cursor, and packaging the CLI, are next.
+The Markdown/Obsidian import and `connect` loop now work end-to-end. Validating the MCP bridge with Claude Desktop and Cursor, and packaging the CLI, are next.
 
 ### How it works
 
@@ -114,11 +113,15 @@ Design principles:
 |---|---|
 | Local memory store | SQLite; CSV/JSON and Obsidian/Markdown import |
 | Local knowledge import | Markdown folders; frontmatter tags; path-derived scopes; `--dry-run` |
+| Import + connect | `uomp connect --vault <path>` imports Markdown and grants in one command |
 | One-command install | `install.sh` source build (Node 22 + git) |
 | Demo & diagnostics | `uomp demo` (isolated) and `uomp doctor` |
 | Agent manifest | `uom.json` with requested scopes |
-| Authorization | CLI, with tag/key/field scopes and deny lists |
-| MCP | stdio server with `list_memory`, `search_memory`, and `read_memory` (experimental) |
+| Authorization | CLI/`uomp connect`, with tag/key/field scopes and deny lists |
+| MCP client setup | `uomp connect claude\|cursor\|opencode` writes the client config and starts the local server |
+| Server lifecycle | Background server from `connect` or `uomp start`; `uomp status`, `uomp stop` |
+| Disconnect | `uomp disconnect claude\|cursor\|opencode` removes the client entry and revokes its session |
+| MCP runtime | stdio server with `list_memory`, `search_memory`, and `read_memory` (experimental) |
 | Capability tokens | EdDSA-signed JWT, 30-minute default |
 | Enforcement | Memory Guard: scope filtering, aggregation, audit log |
 | Revocation | `revoke` / `close` invalidate the next request |
@@ -130,7 +133,7 @@ Design principles:
 
 ### What we are building next
 
-1. **MCP hardening** — validate with Claude Desktop/Cursor, then add resources, prompts, and client setup helpers.
+1. **MCP hardening** — validate with Claude Desktop/Cursor, then add resources, prompts, and more client config presets.
 2. **Packaged CLI release** — npm or a standalone binary, so users do not need a local build.
 3. **More local connectors** — beyond Obsidian/Markdown.
 4. **Python SDK** — meet agent developers where most agents are built.
@@ -189,7 +192,17 @@ uomp doctor
 
 It checks Node, git, data-directory permissions, keys, databases, session env files, and the local server port.
 
-**Import an Obsidian / Markdown vault**
+**Import and connect in one step**
+
+```bash
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+```
+
+This imports the Markdown vault, starts the local Auth + Guard server in the background, creates a 30-minute session, writes `~/.uomp/sessions/claude.env`, and merges the UOMP entry into the client config (an existing file is backed up). Restart the client, then ask it to list notes under `notes/projects`.
+
+Use `--vault-tag <tag>` to change the base tag (default `notes`). For CSV/JSON or repeated syncs, import separately with `uomp import`.
+
+**Or import separately**
 
 ```bash
 uomp import ~/Obsidian/MyVault
@@ -198,13 +211,27 @@ uomp import ~/Obsidian/MyVault --dry-run
 
 Directory paths become scopes: `projects/uomp/plan.md` is tagged `notes`, `notes/projects`, and `notes/projects/uomp`. Frontmatter `tags`, `title`, and `sensitivity` are preserved.
 
-**Authorize an agent**
+**Connect a client after importing**
 
 ```bash
-uomp authorize ./examples/calendar-agent --scope preference
+uomp connect claude --scope notes/projects
 ```
 
-This starts the local Auth + Guard server, creates a 30-minute session, and writes the token to `~/.uomp/sessions/<sessionId>.env` with mode `0600`. It prints the exact `source` command and the revoke command. The full token is not printed by default.
+If your notes are already imported, omit `--vault`; everything else is the same.
+
+No terminal needs to stay open. `uomp status` shows the background server and active sessions; `uomp stop` stops the server (it does not revoke sessions); `uomp disconnect claude` removes the client entry and revokes its session. If you used `--config`, pass the same path to `disconnect`.
+
+Use `uomp connect cursor` or `uomp connect opencode` for the other clients. Re-run the same command to renew; the previous session is revoked, the token is refreshed, and the client does not need a restart. `--foreground` keeps the server in this terminal; `--print-config` prints the JSON without writing it; `--skip-config` grants only.
+
+High-sensitivity tags (for example `portfolio:holdings`, or items imported with `sensitivity: high`) are never selected by default. In an interactive run, select the tag and then choose keys individually. In scripts, grant keys explicitly with `--allow-key <key...>`, or use `--allow-high <tag...>` to explicitly allow every key under a high-sensitivity tag.
+
+**Authorize an agent package**
+
+```bash
+uomp connect ./examples/calendar-agent --scope preference
+```
+
+This starts the local Auth + Guard server in the background, creates a 30-minute session, and writes the token to `~/.uomp/sessions/<sessionId>.env` with mode `0600`. It prints the exact `source` command and the revoke command. The full token is not printed by default. `uomp authorize` remains available as the lower-level/script entry point.
 
 **Run the agent in a second terminal**
 
@@ -213,18 +240,20 @@ source ~/.uomp/sessions/<sessionId>.env
 node ./examples/calendar-agent/index.js
 ```
 
-Keep the `authorize` terminal open while the agent runs. Use `uomp sessions` to see active sessions and `uomp revoke <sessionId>` to invalidate one immediately. `uomp audit` shows every allow/deny decision; filter with `--since 24h`, `--result deny`, or `--key <key>`. Both commands support `--json` for scripts.
+The server stays in the background. `uomp status` shows it and the active sessions; `uomp stop` stops it. Add `--foreground` if you want the server logs in this terminal. Use `uomp sessions` to see active sessions and `uomp revoke <sessionId>` to invalidate one immediately. `uomp audit` shows every allow/deny decision; filter with `--since 24h`, `--result deny`, or `--key <key>`. Both commands support `--json` for scripts.
 
 If you prefer to run the server separately:
 
 ```bash
 # Terminal 1
 uomp serve
+# or run it in the background: uomp start
 
 # Terminal 2
-uomp authorize ./examples/calendar-agent --scope preference --no-server
+uomp connect claude --scope notes/projects --no-server
 
-# Terminal 3
+# Agent packages:
+uomp connect ./examples/calendar-agent --scope preference --no-server
 source ~/.uomp/sessions/<sessionId>.env
 node ./examples/calendar-agent/index.js
 ```
@@ -236,13 +265,16 @@ uomp import ./examples/stock-analyst/sample-risk.json --replace
 uomp import ./examples/stock-analyst/sample-holdings.csv \
   --tag portfolio:holdings --sensitivity high --replace
 
-uomp authorize ./examples/stock-analyst \
-  --scope portfolio:holdings profile:risk
+uomp connect ./examples/stock-analyst \
+  --scope portfolio:holdings profile:risk \
+  --allow-high portfolio:holdings
 
 # In a second terminal, source the env file printed above, then run:
 source ~/.uomp/sessions/<sessionId>.env
 node ./examples/stock-analyst/index.js
 ```
+
+`portfolio:holdings` is high-sensitivity. `--allow-high` is an explicit bulk override for this demo. For per-key control, use `--allow-key <key...>` or run `uomp connect` without `--scope` and select keys interactively.
 
 **Developer shortcut**
 
@@ -252,11 +284,9 @@ uomp agent run ./examples/calendar-agent
 
 > Admin operations (`createSession`, `grant`, `revoke`) require the local admin token stored at `~/.uomp/.secrets/admin-token`. The Node SDK only reads `UOMP_ADMIN_TOKEN` when the base URL is loopback.
 
-### Use with Claude Desktop / Cursor (experimental)
+### Manual MCP setup (unsupported clients)
 
-The CLI includes a stdio MCP server with three tools: `list_memory`, `search_memory`, and `read_memory`. `list_memory` and `search_memory` return keys and metadata only; `read_memory` returns content. Every call still goes through Memory Guard scope, expiry, revocation, and audit.
-
-The MCP server is only a stdio bridge; keep the UOMP HTTP server running:
+`uomp connect` handles Claude Desktop, Cursor, and OpenCode. For other stdio clients, or if you want to edit the config yourself, use the manual two-step flow:
 
 ```bash
 # Terminal 1
@@ -264,35 +294,13 @@ uomp serve
 
 # Terminal 2
 uomp import ~/Obsidian/MyVault
-uomp authorize \
-  --scope notes/projects \
-  --output ~/.uomp/mcp-client.env \
-  --no-server
-
-uomp mcp --session ~/.uomp/mcp-client.env --print-config --client claude
+uomp authorize --scope notes/projects --output ~/.uomp/mcp-client.env --no-server
+uomp mcp --session ~/.uomp/mcp-client.env --print-config
 ```
 
-Use `--client cursor` or `--client opencode` for those clients. Without `--client`, the output is the generic `mcpServers` shape. Paste the output into your MCP client config. It looks like:
+Paste the JSON into the client's `mcpServers` entry. The entry points at the session env file, not the token itself, so the client config contains no secret. The MCP server re-reads the env file before every tool call; re-run `authorize` to the same `--output` path to renew without restarting the client. A custom `--output` file is not removed by `uomp revoke`.
 
-```json
-{
-  "mcpServers": {
-    "uomp": {
-      "command": "/usr/local/bin/node",
-      "args": [
-        "/home/me/.uomp/cli/src/packages/cli/dist/cli.js",
-        "mcp",
-        "--session",
-        "/home/me/.uomp/mcp-client.env"
-      ]
-    }
-  }
-}
-```
-
-Restart the client, then ask it to list notes under `notes/projects` and read one. Keep the `uomp serve` terminal running. The MCP server re-reads the env file on startup and before every tool call. With a fixed `--output` path, re-run `uomp authorize` and the next call picks up the new token; if `--session` points at a session ID instead, restart the client. A custom `--output` file is not removed by `uomp revoke`.
-
-Validated with the official MCP SDK and OpenCode v2.2.0. Claude Desktop/Cursor validation is still pending. For OpenCode, set `"codemode": false` on the server entry to expose the three tools directly.
+The stdio MCP server provides `list_memory`, `search_memory`, and `read_memory`. `list_memory` and `search_memory` return keys and metadata only; `read_memory` returns content. Every call still goes through Memory Guard scope, expiry, revocation, and audit. Validated with the official MCP SDK and OpenCode v2.2.0; Claude Desktop/Cursor validation is still pending.
 
 ### Security model
 
@@ -409,13 +417,12 @@ UOMP 就是让这句话可执行的那一层。
 
 **让 Claude Desktop 或 Cursor 临时访问你的 Obsidian 笔记库。**
 
-1. 用 `uomp import ~/Obsidian/MyVault` 导入一个本地目录，或接入已有的记忆源。
-2. Agent 声明范围：“读项目笔记，不读私人日记。”
-3. 你在 CLI 里批准 30 分钟。
-4. Agent 通过 Memory Guard 读取，每次访问都有日志。
-5. 你撤销，下一个请求直接 `403`。
+1. 运行 `uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects`。
+2. UOMP 导入笔记库、在后台启动本地服务、签发 30 分钟会话，并把 MCP 配置写入 Claude Desktop；重启 Claude Desktop。
+3. 让 Claude 读取项目笔记，每次访问都有日志。
+4. 你撤销，下一个请求直接 `403`。
 
-Markdown/Obsidian 导入和 CLI 授权闭环现在已经跑通。stdio MCP server 已经可以早期试用；接下来是用 Claude Desktop / Cursor 验证，以及打包 CLI。
+Markdown/Obsidian 导入和 `connect` 授权闭环现在已经跑通。stdio MCP server 已经可以早期试用；接下来是用 Claude Desktop / Cursor 验证，以及打包 CLI。
 
 ### 工作方式
 
@@ -446,11 +453,15 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 |---|---|
 | 本地记忆存储 | SQLite，支持 CSV/JSON 和 Obsidian/Markdown 导入 |
 | 本地知识导入 | Markdown 目录、frontmatter tags、按路径生成范围、`--dry-run` |
+| 导入 + 连接 | `uomp connect --vault <path>` 一条命令完成 Markdown 导入和授权 |
 | 一条命令安装 | `install.sh` 源码构建（Node 22 + git） |
 | Demo 与诊断 | `uomp demo`（隔离数据）和 `uomp doctor` |
 | Agent 声明 | `uom.json`，声明请求范围 |
-| 授权 | CLI，支持 tag/key/field 范围和 deny 列表 |
-| MCP | stdio server，提供 `list_memory`、`search_memory` 和 `read_memory`（实验） |
+| 授权 | CLI/`uomp connect`，支持 tag/key/field 范围和 deny 列表 |
+| MCP 客户端配置 | `uomp connect claude\|cursor\|opencode` 自动写配置并启动本地服务 |
+| 服务生命周期 | `connect` 或 `uomp start` 后台启动；`uomp status`、`uomp stop` |
+| 断开客户端 | `uomp disconnect claude\|cursor\|opencode` 移除客户端条目并撤销会话 |
+| MCP 运行时 | stdio server，提供 `list_memory`、`search_memory` 和 `read_memory`（实验） |
 | Capability Token | EdDSA 签名 JWT，默认 30 分钟 |
 | 执行 | Memory Guard：范围过滤、聚合、审计日志 |
 | 撤销 | `revoke` / `close` 后下一个请求失效 |
@@ -462,7 +473,7 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 
 ### 下一步做什么
 
-1. **MCP 完善**：先用 Claude Desktop / Cursor 验证，再补 resources、prompts 和客户端配置助手。
+1. **MCP 完善**：先用 Claude Desktop / Cursor 验证，再补 resources、prompts 和更多客户端配置预设。
 2. **打包发布 CLI**：npm 或独立二进制，用户不需要本地构建。
 3. **更多本地连接器**：在 Obsidian/Markdown 之外继续扩展。
 4. **Python SDK**：去 Agent 开发者最多的地方。
@@ -521,7 +532,17 @@ uomp doctor
 
 它会检查 Node、git、数据目录权限、密钥、数据库、会话 env 文件和本地 server 端口。
 
-**导入 Obsidian / Markdown 笔记库**
+**一步导入并连接**
+
+```bash
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+```
+
+这条命令会导入 Markdown 笔记库、在后台启动本地 Auth + Guard server、创建 30 分钟会话、把 token 写入 `~/.uomp/sessions/claude.env`，并把 UOMP 条目合并进客户端配置（已有文件会先备份）。重启客户端，然后让它列出 `notes/projects` 下的笔记。
+
+用 `--vault-tag <tag>` 可以改基础 tag（默认 `notes`）。CSV/JSON 或需要反复同步时，仍然用 `uomp import` 单独导入。
+
+**或者单独导入**
 
 ```bash
 uomp import ~/Obsidian/MyVault
@@ -530,13 +551,27 @@ uomp import ~/Obsidian/MyVault --dry-run
 
 目录路径会变成授权范围：`projects/uomp/plan.md` 会带上 `notes`、`notes/projects`、`notes/projects/uomp` 三个 tag。Frontmatter 里的 `tags`、`title`、`sensitivity` 会保留。
 
-**授权一个 Agent**
+**导入后连接客户端**
 
 ```bash
-uomp authorize ./examples/calendar-agent --scope preference
+uomp connect claude --scope notes/projects
 ```
 
-这条命令会启动本地 Auth + Guard server，创建 30 分钟会话，并把 token 写入 `~/.uomp/sessions/<sessionId>.env`（权限 `0600`）。它会打印需要执行的 `source` 命令和撤销命令；默认不打印完整 token。
+如果笔记已经导入，省略 `--vault` 即可，其他行为相同。
+
+不需要保持终端打开。`uomp status` 查看后台服务和活跃会话；`uomp stop` 停止服务（不会撤销会话）；`uomp disconnect claude` 移除客户端条目并撤销会话。如果你用了 `--config`，`disconnect` 也要传同一个路径。
+
+Cursor 用 `uomp connect cursor`，OpenCode 用 `uomp connect opencode`。重新执行同一条命令即可续期：旧会话会被撤销、token 会刷新，客户端不需要重启。`--foreground` 让 server 留在当前终端；`--print-config` 只打印 JSON 不写文件；`--skip-config` 只授权不写配置。
+
+高敏 tag（例如 `portfolio:holdings`，或以 `sensitivity: high` 导入的数据）默认不会被选中。交互运行时先选 tag，再逐个选择 key；脚本里用 `--allow-key <key...>` 显式授权，或用 `--allow-high <tag...>` 显式放开某个高敏 tag 下的全部 key。
+
+**授权一个 Agent 包**
+
+```bash
+uomp connect ./examples/calendar-agent --scope preference
+```
+
+这条命令会在后台启动本地 Auth + Guard server，创建 30 分钟会话，并把 token 写入 `~/.uomp/sessions/<sessionId>.env`（权限 `0600`）。它会打印需要执行的 `source` 命令和撤销命令；默认不打印完整 token。`uomp authorize` 仍然作为底层/脚本入口保留。
 
 **在第二个终端运行 Agent**
 
@@ -545,18 +580,20 @@ source ~/.uomp/sessions/<sessionId>.env
 node ./examples/calendar-agent/index.js
 ```
 
-Agent 运行期间保持 `authorize` 终端打开。`uomp sessions` 查看活跃会话，`uomp revoke <sessionId>` 立即撤销。`uomp audit` 查看每次允许/拒绝决策；可以用 `--since 24h`、`--result deny` 或 `--key <key>` 过滤。两个命令都支持 `--json`，方便脚本处理。
+服务在后台运行。`uomp status` 查看服务和活跃会话；`uomp stop` 停止服务。想把日志留在当前终端就加 `--foreground`。`uomp sessions` 查看活跃会话，`uomp revoke <sessionId>` 立即撤销。`uomp audit` 查看每次允许/拒绝决策；可以用 `--since 24h`、`--result deny` 或 `--key <key>` 过滤。两个命令都支持 `--json`，方便脚本处理。
 
 如果你想分开运行 server：
 
 ```bash
 # 终端 1
 uomp serve
+# 或后台运行：uomp start
 
 # 终端 2
-uomp authorize ./examples/calendar-agent --scope preference --no-server
+uomp connect claude --scope notes/projects --no-server
 
-# 终端 3
+# Agent 包：
+uomp connect ./examples/calendar-agent --scope preference --no-server
 source ~/.uomp/sessions/<sessionId>.env
 node ./examples/calendar-agent/index.js
 ```
@@ -568,13 +605,16 @@ uomp import ./examples/stock-analyst/sample-risk.json --replace
 uomp import ./examples/stock-analyst/sample-holdings.csv \
   --tag portfolio:holdings --sensitivity high --replace
 
-uomp authorize ./examples/stock-analyst \
-  --scope portfolio:holdings profile:risk
+uomp connect ./examples/stock-analyst \
+  --scope portfolio:holdings profile:risk \
+  --allow-high portfolio:holdings
 
 # 在第二个终端 source 上面打印的 env 文件，然后运行：
 source ~/.uomp/sessions/<sessionId>.env
 node ./examples/stock-analyst/index.js
 ```
+
+`portfolio:holdings` 是高敏 tag。`--allow-high` 是这个 demo 的显式批量覆盖；需要逐 key 控制时用 `--allow-key <key...>`，或者不带 `--scope` 运行 `uomp connect` 交互选择。
 
 **开发者快捷方式**
 
@@ -584,11 +624,9 @@ uomp agent run ./examples/calendar-agent
 
 > 管理员操作（`createSession`、`grant`、`revoke`）需要本机管理员令牌，默认存放在 `~/.uomp/.secrets/admin-token`。Node SDK 仅在 base URL 为 loopback 时读取 `UOMP_ADMIN_TOKEN`。
 
-### 配合 Claude Desktop / Cursor 使用（实验）
+### 手动配置 MCP（不支持的客户端）
 
-CLI 内置一个 stdio MCP server，提供三个工具：`list_memory`、`search_memory` 和 `read_memory`。`list_memory` 和 `search_memory` 只返回 key 和元数据，`read_memory` 返回内容。每次调用仍然经过 Memory Guard 的范围、过期、撤销和审计。
-
-MCP server 只是一个 stdio 桥接；UOMP HTTP server 需要保持运行：
+`uomp connect` 已经处理 Claude Desktop、Cursor 和 OpenCode。其他 stdio 客户端，或者你想自己编辑配置时，走手动两步：
 
 ```bash
 # 终端 1
@@ -596,35 +634,13 @@ uomp serve
 
 # 终端 2
 uomp import ~/Obsidian/MyVault
-uomp authorize \
-  --scope notes/projects \
-  --output ~/.uomp/mcp-client.env \
-  --no-server
-
-uomp mcp --session ~/.uomp/mcp-client.env --print-config --client claude
+uomp authorize --scope notes/projects --output ~/.uomp/mcp-client.env --no-server
+uomp mcp --session ~/.uomp/mcp-client.env --print-config
 ```
 
-用 `--client cursor` 或 `--client opencode` 可生成对应客户端配置；不传时输出通用 `mcpServers` 结构。把输出粘贴到 MCP 客户端配置里。它看起来像：
+把输出的 JSON 粘贴到客户端的 `mcpServers` 条目。条目引用的是会话 env 文件，不是 token 本身，所以客户端配置里没有秘密。MCP server 会在每次工具调用前重新读取 env 文件；重新对同一个 `--output` 路径执行 `authorize` 即可续期，不需要重启客户端。自定义 `--output` 文件不会被 `uomp revoke` 自动删除。
 
-```json
-{
-  "mcpServers": {
-    "uomp": {
-      "command": "/usr/local/bin/node",
-      "args": [
-        "/home/me/.uomp/cli/src/packages/cli/dist/cli.js",
-        "mcp",
-        "--session",
-        "/home/me/.uomp/mcp-client.env"
-      ]
-    }
-  }
-}
-```
-
-重启客户端，然后让它列出 `notes/projects` 下的笔记并读取其中一条。保持 `uomp serve` 终端运行。MCP server 会在启动时和每次工具调用前重新读取 env 文件。使用固定的 `--output` 路径时，重新执行 `uomp authorize` 后下一次调用会自动使用新 token，不需要重启客户端；如果 `--session` 直接指向 session ID，则需要重启。自定义 `--output` 文件不会被 `uomp revoke` 自动删除。
-
-已用官方 MCP SDK 和 OpenCode v2.2.0 验证。Claude Desktop / Cursor 的验证仍在进行。OpenCode 中把 server 条目的 `"codemode"` 设为 `false`，三个工具会直接暴露。
+stdio MCP server 提供 `list_memory`、`search_memory` 和 `read_memory`。`list_memory` 和 `search_memory` 只返回 key 和元数据，`read_memory` 返回内容。每次调用仍然经过 Memory Guard 的范围、过期、撤销和审计。已用官方 MCP SDK 和 OpenCode v2.2.0 验证；Claude Desktop / Cursor 的验证仍在进行。
 
 ### 安全模型
 

@@ -50,12 +50,14 @@ node examples/stock-analyst/server.js
 
 # 授权并调用（另一个终端）
 pnpm cli authorize ./examples/stock-analyst \
-  --scope portfolio:holdings profile:risk --output /tmp/uomp.env --no-server
+  --scope portfolio:holdings profile:risk --allow-high portfolio:holdings --output /tmp/uomp.env --no-server
 source /tmp/uomp.env
 curl -X POST http://localhost:3080/analyze \
   -H 'Content-Type: application/json' \
   -d "{\"token\":\"$UOM_TOKEN\",\"gateway_url\":\"$UOMP_BASE_URL\"}"
 ```
+
+`portfolio:holdings` 是高敏 tag。`--allow-high` 会显式授予该 tag 下所有 key；需要逐 key 控制时改用 `--allow-key <key...>`，或者不带 `--scope` 运行交互授权。
 
 ### 远程 Gateway 模式
 
@@ -74,7 +76,7 @@ curl http://localhost:3080/fingerprint
 
 # 5. 授权并调用
 pnpm cli authorize ./examples/stock-analyst \
-  --scope portfolio:holdings profile:risk --output /tmp/uomp.env --no-server
+  --scope portfolio:holdings profile:risk --allow-high portfolio:holdings --output /tmp/uomp.env --no-server
 source /tmp/uomp.env
 curl -X POST http://localhost:3080/analyze \
   -H 'Content-Type: application/json' \
@@ -188,12 +190,14 @@ pnpm cli import ./examples/stock-analyst/sample-holdings.csv \
   --tag portfolio:holdings --sensitivity high --replace
 node examples/stock-analyst/server.js
 pnpm cli authorize ./examples/stock-analyst \
-  --scope portfolio:holdings profile:risk --output /tmp/uomp.env --no-server
+  --scope portfolio:holdings profile:risk --allow-high portfolio:holdings --output /tmp/uomp.env --no-server
 source /tmp/uomp.env
 curl -X POST http://localhost:3080/analyze \
   -H 'Content-Type: application/json' \
   -d "{\"token\":\"$UOM_TOKEN\",\"gateway_url\":\"$UOMP_BASE_URL\"}"
 ```
+
+`portfolio:holdings` is high-sensitivity. `--allow-high` explicitly grants every key under the tag; use `--allow-key <key...>` for individual keys, or run without `--scope` for the interactive prompt.
 
 ### Self-Serve Web UI
 

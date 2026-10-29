@@ -47,6 +47,7 @@ uomp import ./holdings.csv --tag portfolio:holdings --sensitivity high --replace
 # 4. 授权远程 Agent（本地 server 已在上一步启动）
 uomp authorize ./examples/stock-analyst \
   --scope portfolio:holdings profile:risk \
+  --allow-high portfolio:holdings \
   --output /tmp/uomp-remote.env \
   --no-server
 

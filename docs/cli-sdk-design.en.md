@@ -1,6 +1,6 @@
 # UOMP CLI/SDK Design Document
 
-> **Status: historical design note (pre-CLI-first).** The current CLI path is `init → import → authorize → serve/mcp → sessions / revoke / audit`. `discover`, `connect`, and `registry` are advanced commands hidden from default help, and `authorize` writes a `0600` session env file instead of printing the JWT. See the [README](../README.md#quick-start) for current usage.
+> **Status: historical design note (pre-CLI-first).** The current CLI path is `init → import → connect → sessions / revoke / audit`. `connect` writes the Claude Desktop / Cursor / OpenCode client config and starts the local server; `authorize` and `mcp --print-config` are the manual/script fallback, and `discover`, `inspect`, and `registry` are advanced commands hidden from default help. See the [README](../README.md#quick-start) for current usage.
 >
 > The original analysis below is kept as historical context for the stock-analyst scenario.
 
@@ -9,17 +9,26 @@
 ```bash
 # once
 uomp init
+
+# import + authorize + write config + start the local server in the background
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+
+# sync later / status / audit / disconnect / stop
 uomp import ~/Obsidian/MyVault
-
-# Terminal 1
-uomp serve
-
-# Terminal 2
-uomp authorize ./agent --scope notes/projects --no-server
-uomp mcp --session ~/.uomp/mcp-client.env --print-config
-uomp sessions
+uomp connect claude --scope notes/projects
+uomp status
 uomp audit
+uomp disconnect claude
+uomp stop
 uomp revoke <session-id>
+```
+
+Manual fallback (unsupported clients):
+
+```bash
+uomp serve
+uomp authorize --scope notes/projects --output ~/.uomp/mcp-client.env --no-server
+uomp mcp --session ~/.uomp/mcp-client.env --print-config
 ```
 
 ---
@@ -60,7 +69,7 @@ If the CLI/SDK can support the stock analysis agent well, agents for other scena
 1. Xiao Wang exports his positions from the broker APP as a CSV.
 2. He uses uomp import to import the positions into the local Memory Store.
 3. He discovers stock-analyst in the Registry or a local directory.
-4. He uses uomp connect to verify the agent's identity and claims.
+4. He uses uomp inspect to verify the agent's identity and claims.
 5. He uses uomp authorize to authorize stock-analyst to read positions and risk profile.
 6. The CLI gives him an export UOM_TOKEN=... command.
 7. Xiao Wang copies this command into the terminal running the Agent.
@@ -115,8 +124,8 @@ Breaking down the user story above yields the following requirements:
 |------|-------------|----------------------------------|
 | Import positions CSV | General data import, field mapping, sensitivity labeling | `uomp import` |
 | Discover Agent | Find the Agent from the Registry or local path | `uomp discover` / `uomp registry search` |
-| Verify Agent | Confirm Agent identity, verify package integrity, assess risk | `uomp connect` |
-| Authorize | Display field-level data exposure summary, support editing/redaction | `uomp authorize` |
+| Verify Agent | Confirm Agent identity, verify package integrity, assess risk | `uomp inspect` |
+| Authorize | Display field-level data exposure summary, support editing/redaction | `uomp connect` / `uomp authorize` |
 | Token delivery | Securely hand the Token to the user, without auto-injection | Terminal print + `--output` |
 | Agent reads private data | Agent accesses Memory Guard with Token | SDK `agent.memory.read` |
 | Agent reads public data | Agent calls external quote APIs | SDK `agent.market.*` |
@@ -211,8 +220,13 @@ portfolio:holdings (8 records)
 | `uomp import <file>` | Import any private data into Memory Store |
 | `uomp data` | View data in the local Memory Store |
 | `uomp discover <path-or-registry>` | Discover Agent and display manifest information |
-| `uomp connect <agent>` | Connect to Agent, verify identity, cache manifest, assess risk |
-| `uomp authorize <agent>` | Create Session and issue Token |
+| `uomp connect <claude\|cursor\|opencode\|agent>` | Connect an MCP client or agent package: authorize + write config/env + start the local server |
+| `uomp inspect <agent>` | Verify identity, cache manifest, assess risk |
+| `uomp authorize <agent>` | Create Session and issue Token (manual/script fallback) |
+| `uomp status` | Show the background server, active sessions, and client config status |
+| `uomp start` | Start the UOMP server in the background |
+| `uomp stop` | Stop the background UOMP server |
+| `uomp disconnect <client>` | Remove the client config entry and revoke its session |
 | `uomp sessions` | View active sessions |
 | `uomp revoke <session-id>` | Revoke session |
 | `uomp audit` | View access audit log |
@@ -275,13 +289,13 @@ Requested permissions:
 Write permissions: None
 ```
 
-#### 5.2.3 Connect Agent
+#### 5.2.3 Inspect Agent
 
 ```bash
-$ uomp connect ./examples/stock-analyst
+$ uomp inspect ./examples/stock-analyst
 ```
 
-"Connect" completes:
+"Inspect" completes:
 
 1. Read and parse `uom.json`.
 2. Verify publisher identity (DID / GPG / Registry).
@@ -290,25 +304,26 @@ $ uomp connect ./examples/stock-analyst
 5. Provide risk score.
 6. **Do not start the Agent or issue a Token**.
 
-#### 5.2.4 Authorize Agent
+#### 5.2.4 Connect and Authorize Agent
 
 ```bash
-$ uomp authorize ./examples/stock-analyst
+$ uomp connect ./examples/stock-analyst --scope portfolio:holdings profile:risk --allow-high portfolio:holdings
 ```
 
-The CLI displays a field-level data exposure summary; after user confirmation, it creates a Session and issues a Token:
+The CLI shows the scope summary; after confirmation it creates a Session, issues a Token, and writes a `0600` session env file (MCP clients also get a client config):
 
 ```text
-Session created: sess_abc123
-Capability Token issued (valid until 10:30)
+Session granted: sess_abc123
+  Scope     portfolio:holdings · profile:risk
+  Expires   2026-07-12 10:30 (30 min)
 
-Please set the following environment variables in the terminal where you run the Agent:
+Env file
+  /home/me/.uomp/sessions/sess_abc123.env
 
-  export UOM_TOKEN="eyJhbG..."
-  export UOMP_BASE_URL="http://127.0.0.1:9374"
-
-You can revoke authorization at any time by running `uomp revoke sess_abc123`.
+Revoke with: uomp revoke sess_abc123
 ```
+
+The token is not printed by default; use `--print-token` when needed.
 
 #### 5.2.5 Edit Scope and Redact
 
@@ -487,8 +502,8 @@ uomp registry search stock
 uomp discover registry://stock-analyst
   -> Download/use cache
   -> Verify checksum + signature
-  -> uomp connect completes verification
-  -> uomp authorize grants authorization
+  -> uomp inspect completes verification
+  -> uomp connect grants authorization
 ```
 
 ### 7.4 Verification Levels
@@ -642,8 +657,8 @@ The reference implementation is located at [`uomp-mvp`](https://github.com/0xaic
 Implemented capabilities:
 
 - CLI supports `discover`, `connect`, `authorize`, `sessions`, `revoke`, `audit`, `import`.
-- `authorize` displays field-level data exposure summary; for highly sensitive tags, automatically collects item keys to complete key-level authorization.
-- Token delivery: terminal print + `--output <file>`.
+- `authorize`/`connect` display a data-exposure summary; high-sensitivity tags are unchecked by default, then require per-key approval. Non-interactive runs need `--allow-key` or `--allow-high`.
+- Token delivery: a `0600` session env file; only `--print-token` prints it.
 - Local Registry index (`registry search/list/add/remove`).
 - Agent Developer SDK (`UompAgent.fromEnv()`, `memory.readTag`, `memory.readKey`, `output.save`).
 - Stock analysis Agent demo: import CSV/JSON → authorize → run independently → generate local Markdown report.

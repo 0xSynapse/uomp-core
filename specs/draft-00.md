@@ -101,7 +101,7 @@ Local Profile 和它的 MCP 适配器是当前参考实现的主路径；Remote 
 ### 5.2 Flow
 
 1. Agent 作为独立进程运行，提供 `uom.json` 声明其身份和默认请求的记忆范围。
-2. 用户通过本机 CLI 执行 `uomp authorize`（可选先 `discover` / `connect`），Auth Service 创建 Session（`created` 状态）。Auth Service 可以与 Memory Guard / Store 位于同一机器，也可以由用户选择的可信服务提供。
+2. 用户通过本机 CLI 执行 `uomp connect`（或 `uomp authorize` 手动流程），Auth Service 创建 Session（`created` 状态）。Auth Service 可以与 Memory Guard / Store 位于同一机器，也可以由用户选择的可信服务提供。
 3. 用户确认或调整授权范围后，Auth Service 签发 Capability Token，并将其写入 `0600` 会话 env 文件（`UOM_TOKEN` + `UOMP_BASE_URL`）。
 4. Session 进入 `active` 状态，Agent 或 MCP bridge 加载该 env 文件。
 5. Agent 或 MCP bridge 通过 HTTP API 携带 Token 访问 Memory Guard。
@@ -1388,31 +1388,31 @@ Auth Service 或 Gateway 收到后：
 
 ## 附录 A: 最小交互示例
 
-> 参考 CLI 的当前本地流程。`discover` / `connect` / `registry` 是默认隐藏的高级命令，不在核心路径上。
+> 参考 CLI 的当前本地流程。`connect` 是主入口；`authorize` / `mcp --print-config` 是手动/脚本 fallback；`discover` / `inspect` / `registry` 是默认隐藏的高级命令。
 
 ```bash
-# 终端 1：启动本地 Auth + Guard
-uomp serve
+# MCP 客户端：导入 + 授权 + 写客户端配置 + 后台启动本地 Auth + Guard
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+uomp status
+# 重启 Claude Desktop
 
-# 终端 2：导入、授权并加载会话
-uomp import ~/Obsidian/MyVault
-uomp authorize ./examples/calendar-agent \
-  --scope preference \
-  --output ~/.uomp/calendar.env \
-  --no-server
-source ~/.uomp/calendar.env
-
-# 运行 Agent（独立进程，携带 Token）
+# Agent 包：授权 + 写会话 env 文件
+uomp connect ./examples/calendar-agent --scope preference
+source ~/.uomp/sessions/<session-id>.env
 node ./examples/calendar-agent/index.js
 
-# 可选：为 Claude Desktop / Cursor 生成 MCP 配置
+# 手动 / 不支持的客户端
+uomp serve
+uomp authorize --scope notes/projects --output ~/.uomp/calendar.env --no-server
 uomp mcp --session ~/.uomp/calendar.env --print-config
 
 # 查看会话与审计
 uomp sessions
 uomp audit --limit 20
 
-# 撤销会话
+# 断开客户端 / 停止后台服务 / 撤销会话
+uomp disconnect claude
+uomp stop
 uomp revoke <session-id>
 ```
 

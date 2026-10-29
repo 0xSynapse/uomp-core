@@ -2,7 +2,25 @@
 
 This manifest is for Claude Desktop, Cursor, OpenCode, or any other MCP client. It requests no scopes by default; grant tags explicitly with `--scope`.
 
-The MCP server is a stdio bridge. Keep the local UOMP HTTP server running:
+## One command
+
+```bash
+uomp connect claude --scope notes/projects
+```
+
+If your Markdown vault is not imported yet, add `--vault`:
+
+```bash
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+```
+
+`uomp connect` starts the local server in the background, creates a scoped session, writes the session env file, and merges the UOMP entry into the client config. Restart the client, then ask it to list notes under `notes/projects`.
+
+Use `uomp connect cursor` or `uomp connect opencode` for the other clients. Re-run the same command to renew; the client does not need a restart. `uomp status` shows the server and sessions; `uomp stop` stops the server; `uomp disconnect <client>` removes the config entry and revokes the session.
+
+## Manual setup
+
+For an unsupported client, or to edit the config yourself:
 
 ```bash
 # Terminal 1
@@ -17,7 +35,7 @@ uomp authorize \
 uomp mcp --session ~/.uomp/mcp-client.env --print-config --client claude
 ```
 
-Use `--client cursor` or `--client opencode` for those clients. Paste the generated JSON into the client's config, then restart the client.
+Paste the generated JSON into the client's `mcpServers` entry. Use `--client cursor` or `--client opencode` for those shapes; without `--client`, the output is the generic `mcpServers` shape.
 
 Tools:
 

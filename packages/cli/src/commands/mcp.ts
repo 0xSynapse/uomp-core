@@ -1,8 +1,8 @@
 import { Command } from 'commander';
-import { realpathSync } from 'fs';
 import { createInterface } from 'readline';
 import { UompConfig } from '../config.js';
 import { loadSessionCredentials, type SessionCredentials } from '../utils/session-env.js';
+import { parseMcpClient, printClientConfig } from '../utils/mcp-config.js';
 
 interface McpOptions {
   session?: string;
@@ -10,8 +10,6 @@ interface McpOptions {
   printConfig?: boolean;
   client?: string;
 }
-
-type McpClient = 'generic' | 'claude' | 'cursor' | 'opencode';
 
 interface JsonRpcMessage {
   jsonrpc?: string;
@@ -125,13 +123,13 @@ export class McpCommands {
 
     this.credentials = credentials;
 
-    const client = parseClient(options.client);
+    const client = parseMcpClient(options.client);
     if (client !== 'generic' && !options.printConfig) {
       throw new Error('--client requires --print-config.');
     }
 
     if (options.printConfig) {
-      printClientConfig(credentials, client);
+      printClientConfig(client, credentials.source);
       return;
     }
 
@@ -342,68 +340,6 @@ async function verifySession(baseUrl: string, token: string): Promise<void> {
 function normalizeBaseUrl(value: string): string {
   const withScheme = /^https?:\/\//i.test(value) ? value : `http://${value}`;
   return withScheme.replace(/\/+$/, '');
-}
-
-function parseClient(value?: string): McpClient {
-  if (!value || value === 'generic') return 'generic';
-  if (value === 'claude' || value === 'cursor' || value === 'opencode') return value;
-
-  throw new Error(`Unknown client "${value}". Use claude, cursor, opencode, or generic.`);
-}
-
-function printClientConfig(credentials: SessionCredentials, client: McpClient): void {
-  const entry = process.argv[1];
-  if (!entry) {
-    throw new Error('Cannot determine the UOMP CLI path.');
-  }
-
-  const cliPath = realpathSync(entry);
-  const isScript = /\.[cm]?js$/.test(cliPath);
-  const command = isScript ? process.execPath : cliPath;
-  const args = [
-    ...(isScript ? [cliPath] : []),
-    'mcp',
-    '--session',
-    credentials.source,
-  ];
-
-  if (client === 'opencode') {
-    process.stdout.write(`${JSON.stringify({
-      mcp: {
-        servers: {
-          uomp: {
-            type: 'local',
-            command: [command, ...args],
-            codemode: false,
-          },
-        },
-      },
-    }, null, 2)}\n`);
-    process.stderr.write(`Add to opencode.json (project) or ~/.config/opencode/opencode.json (global).\n`);
-    return;
-  }
-
-  process.stdout.write(`${JSON.stringify({
-    mcpServers: {
-      uomp: { command, args },
-    },
-  }, null, 2)}\n`);
-
-  if (client === 'claude') {
-    process.stderr.write(`Add to ${claudeConfigPath()}.\n`);
-  } else if (client === 'cursor') {
-    process.stderr.write('Add to .cursor/mcp.json (project) or ~/.cursor/mcp.json (global).\n');
-  }
-}
-
-function claudeConfigPath(): string {
-  if (process.platform === 'darwin') {
-    return '~/Library/Application Support/Claude/claude_desktop_config.json';
-  }
-  if (process.platform === 'win32') {
-    return '%APPDATA%\\Claude\\claude_desktop_config.json';
-  }
-  return '~/.config/Claude/claude_desktop_config.json';
 }
 
 async function readJson(response: Response): Promise<any> {

@@ -1,8 +1,5 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { existsSync } from 'fs';
-import { rm } from 'fs/promises';
-import { join } from 'path';
 import { UompConfig } from '../config.js';
 import { AuthService } from '@uomp/auth';
 import { MemoryGuard } from '@uomp/guard';
@@ -14,6 +11,7 @@ import {
   formatScopes,
   sanitizeText,
 } from '../utils/format.js';
+import { removeSessionEnvFiles } from '../utils/session-files.js';
 
 export class SessionsCommands {
   private static async getServices(): Promise<{ config: UompConfig; auth: AuthService; guard: MemoryGuard }> {
@@ -123,9 +121,7 @@ export class SessionsCommands {
             console.log(chalk.green(`Revoked session: ${sessionId}`));
             console.log(chalk.gray("The agent's next request will fail with 403."));
 
-            const envPath = join(config.sessionsDir, `${sessionId}.env`);
-            if (existsSync(envPath)) {
-              await rm(envPath, { force: true });
+            for (const envPath of await removeSessionEnvFiles(config.sessionsDir, sessionId)) {
               console.log(chalk.gray(`Removed env file: ${envPath}`));
             }
           } else {

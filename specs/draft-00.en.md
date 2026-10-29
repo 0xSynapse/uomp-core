@@ -101,7 +101,7 @@ The Local Profile and its MCP adapter are the current reference implementation p
 ### 5.2 Flow
 
 1. The Agent runs as an independent process and provides a `uom.json` declaring its identity and default requested memory scope.
-2. The user runs `uomp authorize` from the local CLI (optionally after `discover` / `connect`), and the Auth Service creates a Session in the `created` state. The Auth Service may run on the same machine as the Memory Guard / Store or may be provided by a trusted service chosen by the user.
+2. The user runs `uomp connect` from the local CLI (or `uomp authorize` for the manual flow), and the Auth Service creates a Session in the `created` state. The Auth Service may run on the same machine as the Memory Guard / Store or may be provided by a trusted service chosen by the user.
 3. After the user confirms or adjusts the authorization scope, the Auth Service issues a Capability Token and writes it to a `0600` session env file (`UOM_TOKEN` + `UOMP_BASE_URL`).
 4. The Session enters the `active` state, and the Agent or MCP bridge loads the env file.
 5. The Agent or MCP bridge calls Memory Guard via the HTTP API with the Token.
@@ -1377,31 +1377,31 @@ Deletion proofs can be recorded on-chain via the `AuditAnchor` contract (§18.4)
 
 ## Appendix A: Minimal Interaction Example
 
-> Current local flow for the reference CLI. `discover` / `connect` / `registry` are advanced commands hidden from default help and are not on the core path.
+> Current local flow for the reference CLI. `connect` is the main entry point; `authorize` / `mcp --print-config` are the manual/script fallback; `discover` / `inspect` / `registry` are advanced commands hidden from default help.
 
 ```bash
-# Terminal 1: start local Auth + Guard
-uomp serve
+# MCP client: import + authorize + write client config + start Auth + Guard in the background
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+uomp status
+# Restart Claude Desktop
 
-# Terminal 2: import, authorize, and load the session
-uomp import ~/Obsidian/MyVault
-uomp authorize ./examples/calendar-agent \
-  --scope preference \
-  --output ~/.uomp/calendar.env \
-  --no-server
-source ~/.uomp/calendar.env
-
-# Run the Agent as an independent process with the Token
+# Agent package: authorize + write the session env file
+uomp connect ./examples/calendar-agent --scope preference
+source ~/.uomp/sessions/<session-id>.env
 node ./examples/calendar-agent/index.js
 
-# Optional: generate an MCP config for Claude Desktop / Cursor
+# Manual / unsupported clients
+uomp serve
+uomp authorize --scope notes/projects --output ~/.uomp/calendar.env --no-server
 uomp mcp --session ~/.uomp/calendar.env --print-config
 
 # View sessions and audit
 uomp sessions
 uomp audit --limit 20
 
-# Revoke the session
+# Disconnect the client / stop the background server / revoke the session
+uomp disconnect claude
+uomp stop
 uomp revoke <session-id>
 ```
 

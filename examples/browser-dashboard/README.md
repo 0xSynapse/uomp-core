@@ -11,6 +11,7 @@ uomp gateway start --browser
 # 2. Authorize
 pnpm cli authorize ./examples/stock-analyst \
   --scope portfolio:holdings profile:risk \
+  --allow-high portfolio:holdings \
   --output /tmp/uomp.env --no-server
 source /tmp/uomp.env
 

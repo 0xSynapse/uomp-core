@@ -185,7 +185,7 @@ export function isLoopbackHost(host: string): boolean {
   return host === '127.0.0.1' || host === 'localhost' || host === '::1';
 }
 
-async function probeUompServer(url: string): Promise<boolean> {
+export async function probeUompServer(url: string): Promise<boolean> {
   try {
     const response = await fetch(`${url}/health`, {
       signal: AbortSignal.timeout(1_000),
