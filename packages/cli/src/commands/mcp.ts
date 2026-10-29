@@ -20,7 +20,7 @@ interface JsonRpcMessage {
 const TOOLS = [
   {
     name: 'list_memory',
-    description: 'List memory items authorized by the current UOMP session for a tag. Use this to discover keys before reading them.',
+    description: 'List keys and metadata authorized by the current UOMP session for a tag. Content is not included; use read_memory for a specific key.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -36,6 +36,31 @@ const TOOLS = [
         },
       },
       required: ['tag'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'search_memory',
+    description: 'Search authorized memory items for a tag by text. Returns keys and metadata only; use read_memory for content.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tag: {
+          type: 'string',
+          description: 'Scope tag to search, for example notes/projects',
+        },
+        query: {
+          type: 'string',
+          description: 'Text to match against key, title, path, description, tags, or content',
+        },
+        limit: {
+          type: 'number',
+          minimum: 1,
+          maximum: 100,
+          default: 20,
+        },
+      },
+      required: ['tag', 'query'],
       additionalProperties: false,
     },
   },
@@ -196,22 +221,37 @@ export class McpCommands {
         return toolError('The "tag" argument is required.');
       }
 
-      const url = new URL(`${baseUrl}/v1/memory`);
-      url.searchParams.set('tag', tag);
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const body = await readJson(response);
-
-      if (!response.ok) {
-        return toolError(formatHttpError(response, body));
+      const result = await fetchItemsByTag(baseUrl, token, tag);
+      if (!result.items) {
+        return toolError(result.error ?? 'Request failed.');
       }
 
-      const items = Array.isArray(body?.items) ? body.items : [];
       const limit = clampLimit(args.limit);
       return toolResult(JSON.stringify({
-        count: items.length,
-        items: items.slice(0, limit),
+        count: result.items.length,
+        items: result.items.slice(0, limit).map(summarizeItem),
+      }, null, 2));
+    }
+
+    if (name === 'search_memory') {
+      const tag = typeof args.tag === 'string' ? args.tag.trim() : '';
+      const query = typeof args.query === 'string' ? args.query.trim() : '';
+      if (!tag || !query) {
+        return toolError('The "tag" and "query" arguments are required.');
+      }
+
+      const result = await fetchItemsByTag(baseUrl, token, tag);
+      if (!result.items) {
+        return toolError(result.error ?? 'Request failed.');
+      }
+
+      const needle = query.toLowerCase();
+      const matches = result.items.filter(item => searchableText(item).includes(needle));
+      const limit = clampLimit(args.limit, 20);
+      return toolResult(JSON.stringify({
+        count: matches.length,
+        query,
+        items: matches.slice(0, limit).map(summarizeItem),
       }, null, 2));
     }
 
@@ -302,15 +342,63 @@ async function readJson(response: Response): Promise<any> {
   }
 }
 
+async function fetchItemsByTag(
+  baseUrl: string,
+  token: string,
+  tag: string
+): Promise<{ items?: any[]; error?: string }> {
+  const url = new URL(`${baseUrl}/v1/memory`);
+  url.searchParams.set('tag', tag);
+
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const body = await readJson(response);
+
+  if (!response.ok) {
+    return { error: formatHttpError(response, body) };
+  }
+
+  return { items: Array.isArray(body?.items) ? body.items : [] };
+}
+
+function summarizeItem(item: any): Record<string, unknown> {
+  const value = item?.value ?? {};
+  return {
+    key: item?.key,
+    title: value.title,
+    path: value.path,
+    tags: item?.tags,
+    sensitivity: item?.sensitivity,
+    description: item?.description,
+    updated_at: item?.updated_at,
+  };
+}
+
+function searchableText(item: any): string {
+  const value = item?.value ?? {};
+  return [
+    item?.key,
+    item?.description,
+    ...(Array.isArray(item?.tags) ? item.tags : []),
+    value.title,
+    value.path,
+    value.content,
+  ]
+    .filter(value => typeof value === 'string')
+    .join('\n')
+    .toLowerCase();
+}
+
 function formatHttpError(response: Response, body: any): string {
   const code = body?.error?.code;
   const message = body?.error?.message ?? response.statusText;
   return code ? `${code}: ${message}` : message;
 }
 
-function clampLimit(value: unknown): number {
+function clampLimit(value: unknown, fallback = 50): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    return 50;
+    return fallback;
   }
 
   return Math.min(100, Math.max(1, Math.floor(value)));

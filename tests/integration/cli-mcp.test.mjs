@@ -127,14 +127,14 @@ test('mcp serves authorized memory over stdio', async t => {
   try {
     store.set({
       key: 'note.projects.plan',
-      value: { body: 'Ship the CLI.' },
+      value: { path: 'projects/plan.md', title: 'Plan', content: 'Ship the CLI.' },
       tags: ['notes/projects'],
       sensitivity: 'low',
       source: 'user',
     });
     store.set({
       key: 'note.journal.private',
-      value: { body: 'Do not read.' },
+      value: { path: 'journal/private.md', title: 'Private', content: 'Do not read.' },
       tags: ['notes/journal'],
       sensitivity: 'low',
       source: 'user',
@@ -189,7 +189,7 @@ test('mcp serves authorized memory over stdio', async t => {
   assert.ok(initialized.result.capabilities.tools);
 
   const tools = await mcp.request('tools/list');
-  assert.deepEqual(tools.result.tools.map(tool => tool.name), ['list_memory', 'read_memory']);
+  assert.deepEqual(tools.result.tools.map(tool => tool.name), ['list_memory', 'search_memory', 'read_memory']);
 
   const listed = await mcp.request('tools/call', {
     name: 'list_memory',
@@ -198,6 +198,22 @@ test('mcp serves authorized memory over stdio', async t => {
   assert.equal(listed.result.isError, false);
   assert.match(listed.result.content[0].text, /note\.projects\.plan/);
   assert.doesNotMatch(listed.result.content[0].text, /note\.journal\.private/);
+  assert.doesNotMatch(listed.result.content[0].text, /Ship the CLI\./);
+
+  const searched = await mcp.request('tools/call', {
+    name: 'search_memory',
+    arguments: { tag: 'notes/projects', query: 'ship' },
+  });
+  assert.equal(searched.result.isError, false);
+  assert.match(searched.result.content[0].text, /note\.projects\.plan/);
+  assert.doesNotMatch(searched.result.content[0].text, /Ship the CLI\./);
+
+  const missed = await mcp.request('tools/call', {
+    name: 'search_memory',
+    arguments: { tag: 'notes/projects', query: 'journal' },
+  });
+  assert.equal(missed.result.isError, false);
+  assert.match(missed.result.content[0].text, /"count": 0/);
 
   const read = await mcp.request('tools/call', {
     name: 'read_memory',
