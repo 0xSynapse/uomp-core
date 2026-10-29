@@ -1,6 +1,6 @@
 # UOMP CLI/SDK Design Document
 
-> **Status: historical design note (pre-CLI-first).** The current CLI path is `init → import → connect → sessions / revoke / audit`. `connect` writes the Claude Desktop / Cursor / OpenCode client config and starts the local server; `authorize` and `mcp --print-config` are the manual/script fallback, and `discover`, `inspect`, and `registry` are advanced commands hidden from default help. See the [README](../README.md#quick-start) for current usage.
+> **Status: historical design note (pre-CLI-first).** The current CLI path is `init → connect`. `connect --vault` imports notes, writes the client config, and starts the server in the background; `authorize` and `mcp --print-config` are the manual/script fallback, and `discover`, `inspect`, and `registry` are advanced commands hidden from default help. On-demand consent uses `connect --on-demand` + `pending` / `approve` / `deny`. See the [README](../README.md#quick-start) for current usage.
 >
 > The original analysis below is kept as historical context for the stock-analyst scenario.
 

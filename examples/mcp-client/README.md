@@ -18,6 +18,16 @@ uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
 
 Use `uomp connect cursor` or `uomp connect opencode` for the other clients. Re-run the same command to renew; the client does not need a restart. `uomp status` shows the server and sessions; `uomp stop` stops the server; `uomp disconnect <client>` removes the config entry and revokes the session.
 
+## On-demand consent
+
+Add `--on-demand` to defer authorization until the first tool call:
+
+```bash
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects --on-demand
+```
+
+The first tool call opens a local approval page. If the page does not open, use `uomp pending` and `uomp approve <request-id>`; `uomp deny <request-id>` closes the request without granting access.
+
 ## Manual setup
 
 For an unsupported client, or to edit the config yourself:

@@ -1,6 +1,6 @@
 # UOMP CLI/SDK 设计文档
 
-> **状态：历史设计文档（CLI-first 之前）。** 当前 CLI 主路径是 `init → import → connect → sessions / revoke / audit`；`connect` 会为 Claude Desktop / Cursor / OpenCode 写客户端配置并启动本地服务，`authorize` 和 `mcp --print-config` 作为手动/脚本 fallback，`discover`、`inspect`、`registry` 是默认隐藏的高级命令。当前用法见 [README](../README.md#quick-start)。
+> **状态：历史设计文档（CLI-first 之前）。** 当前 CLI 主路径是 `init → connect`；`connect --vault` 可同时导入笔记、写客户端配置并后台启动服务，`authorize` 和 `mcp --print-config` 作为手动/脚本 fallback，`discover`、`inspect`、`registry` 是默认隐藏的高级命令。按需授权使用 `connect --on-demand` + `pending` / `approve` / `deny`。当前用法见 [README](../README.md#quick-start)。
 >
 > 下面保留原始设计分析，作为股票分析 Agent 场景的历史参考。
 
