@@ -375,6 +375,26 @@ test('sessions and audit summarize the authorization loop', async t => {
 
   const limited = JSON.parse(runCli(home, ['audit', '--json', '--limit', '1']).stdout);
   assert.equal(limited.length, 1);
+
+  const deniedLogs = JSON.parse(runCli(home, ['audit', '--json', '--result', 'deny']).stdout);
+  assert.equal(deniedLogs.length, 1);
+  assert.equal(deniedLogs[0].allowed, false);
+  assert.equal(deniedLogs[0].key, 'note.journal.private');
+
+  const allowedLogs = JSON.parse(runCli(home, ['audit', '--json', '--result', 'allow']).stdout);
+  assert.equal(allowedLogs.length, 1);
+  assert.equal(allowedLogs[0].allowed, true);
+
+  const keyLogs = JSON.parse(runCli(home, ['audit', '--json', '--key', 'note.projects.plan']).stdout);
+  assert.equal(keyLogs.length, 1);
+  assert.equal(keyLogs[0].key, 'note.projects.plan');
+
+  const recentLogs = JSON.parse(runCli(home, ['audit', '--json', '--since', '1h']).stdout);
+  assert.equal(recentLogs.length, 2);
+
+  const invalidResult = runCli(home, ['audit', '--result', 'nope']);
+  assert.equal(invalidResult.status, 1);
+  assert.match(invalidResult.stdout + invalidResult.stderr, /Invalid --result/);
 });
 
 test('authorize token works against uomp serve on a custom port', async t => {

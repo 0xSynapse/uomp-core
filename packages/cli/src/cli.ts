@@ -140,15 +140,29 @@ program
   .description('Show what agents read or attempted to read')
   .option('-s, --session <sessionId>', 'Filter by session ID')
   .option('-a, --agent <agentId>', 'Filter by agent ID')
+  .option('--since <time>', 'Only entries since 15m, 24h, 7d, or an ISO date')
+  .option('--result <result>', 'Filter by result: allow or deny')
+  .option('-k, --key <key>', 'Filter by memory key')
   .option('-l, --limit <number>', 'Limit number of results', '50')
   .option('--json', 'Output JSON')
-  .action(async (options: { session?: string; agent?: string; limit?: string; json?: boolean }) => {
+  .action(async (options: {
+    session?: string;
+    agent?: string;
+    since?: string;
+    result?: string;
+    key?: string;
+    limit?: string;
+    json?: boolean;
+  }) => {
     const cmd = AuditCommands.list();
     await cmd.parseAsync([
       'node',
       'uomp',
       ...(options.session ? ['--session', options.session] : []),
       ...(options.agent ? ['--agent', options.agent] : []),
+      ...(options.since ? ['--since', options.since] : []),
+      ...(options.result ? ['--result', options.result] : []),
+      ...(options.key ? ['--key', options.key] : []),
       ...(options.limit ? ['--limit', options.limit] : []),
       ...(options.json ? ['--json'] : []),
     ]);

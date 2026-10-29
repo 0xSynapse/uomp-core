@@ -493,7 +493,15 @@ export class MemoryGuard {
     return row.cnt;
   }
 
-  getAuditLogs(options: { sessionId?: string; agentId?: string; limit?: number } = {}): AuditLogEntry[] {    let sql = 'SELECT * FROM audit_logs WHERE 1=1';
+  getAuditLogs(options: {
+    sessionId?: string;
+    agentId?: string;
+    since?: string;
+    allowed?: boolean;
+    key?: string;
+    limit?: number;
+  } = {}): AuditLogEntry[] {
+    let sql = 'SELECT * FROM audit_logs WHERE 1=1';
     const params: (string | number)[] = [];
     if (options.sessionId) {
       sql += ' AND session_id = ?';
@@ -502,6 +510,18 @@ export class MemoryGuard {
     if (options.agentId) {
       sql += ' AND agent_id = ?';
       params.push(options.agentId);
+    }
+    if (options.since) {
+      sql += ' AND timestamp >= ?';
+      params.push(options.since);
+    }
+    if (options.allowed !== undefined) {
+      sql += ' AND allowed = ?';
+      params.push(options.allowed ? 1 : 0);
+    }
+    if (options.key) {
+      sql += ' AND key = ?';
+      params.push(options.key);
     }
     sql += ' ORDER BY timestamp DESC';
     if (options.limit) {

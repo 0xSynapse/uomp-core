@@ -213,7 +213,7 @@ source ~/.uomp/sessions/<sessionId>.env
 node ./examples/calendar-agent/index.js
 ```
 
-Keep the `authorize` terminal open while the agent runs. Use `uomp sessions` to see active sessions and `uomp revoke <sessionId>` to invalidate one immediately. `uomp audit` shows every allow/deny decision; both commands support `--json` for scripts.
+Keep the `authorize` terminal open while the agent runs. Use `uomp sessions` to see active sessions and `uomp revoke <sessionId>` to invalidate one immediately. `uomp audit` shows every allow/deny decision; filter with `--since 24h`, `--result deny`, or `--key <key>`. Both commands support `--json` for scripts.
 
 If you prefer to run the server separately:
 
@@ -545,7 +545,7 @@ source ~/.uomp/sessions/<sessionId>.env
 node ./examples/calendar-agent/index.js
 ```
 
-Agent 运行期间保持 `authorize` 终端打开。`uomp sessions` 查看活跃会话，`uomp revoke <sessionId>` 立即撤销。`uomp audit` 查看每次允许/拒绝决策；两个命令都支持 `--json`，方便脚本处理。
+Agent 运行期间保持 `authorize` 终端打开。`uomp sessions` 查看活跃会话，`uomp revoke <sessionId>` 立即撤销。`uomp audit` 查看每次允许/拒绝决策；可以用 `--since 24h`、`--result deny` 或 `--key <key>` 过滤。两个命令都支持 `--json`，方便脚本处理。
 
 如果你想分开运行 server：
 
