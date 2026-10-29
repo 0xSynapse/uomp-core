@@ -114,6 +114,7 @@ Design principles:
 |---|---|
 | Local memory store | SQLite; CSV/JSON and Obsidian/Markdown import |
 | Local knowledge import | Markdown folders; frontmatter tags; path-derived scopes; `--dry-run` |
+| One-command install | `install.sh` source build (Node 22 + git) |
 | Agent manifest | `uom.json` with requested scopes |
 | Authorization | CLI, with tag/key/field scopes and deny lists |
 | Capability tokens | EdDSA-signed JWT, 30-minute default |
@@ -128,7 +129,7 @@ Design principles:
 ### What we are building next
 
 1. **MCP server** — Claude Desktop, Cursor, and other MCP clients can connect without a custom SDK.
-2. **Installable CLI** — one-command install and upgrade, without cloning the repo.
+2. **Packaged CLI release** — npm or a standalone binary, so users do not need a local build.
 3. **Consent UI** — browser-based grant/revoke, scope preview, and audit timeline. Not CLI-only.
 4. **More local connectors** — beyond Obsidian/Markdown.
 5. **Python SDK** — meet agent developers where most agents are built.
@@ -159,21 +160,24 @@ They remain in the repository and design docs, but we will not let them delay th
 
 ### Quick start
 
-Requirements: Node.js >= 22 and pnpm 9.
+Requirements: Node.js >= 22 and git.
+
+**Install**
 
 ```bash
-pnpm install
-pnpm build
-pnpm cli init
+curl -fsSL https://www.uomp.org/install.sh | bash
+uomp init
 ```
 
-> In this repository the CLI runs as `pnpm cli`. If you install it globally, the same commands are available as `uomp ...`.
+The installer clones UOMP into `~/.uomp/cli`, builds the CLI, and links `uomp` into `~/.local/bin`. If that directory is not on your `PATH`, the script prints the line to add.
+
+From a source checkout, run `pnpm install && pnpm build`, then use `pnpm cli ...` instead of `uomp ...`.
 
 **Import an Obsidian / Markdown vault**
 
 ```bash
-pnpm cli import ~/Obsidian/MyVault
-pnpm cli import ~/Obsidian/MyVault --dry-run
+uomp import ~/Obsidian/MyVault
+uomp import ~/Obsidian/MyVault --dry-run
 ```
 
 Directory paths become scopes: `projects/uomp/plan.md` is tagged `notes`, `notes/projects`, and `notes/projects/uomp`. Frontmatter `tags`, `title`, and `sensitivity` are preserved.
@@ -181,7 +185,7 @@ Directory paths become scopes: `projects/uomp/plan.md` is tagged `notes`, `notes
 **Authorize an agent**
 
 ```bash
-pnpm cli authorize ./examples/calendar-agent --scope preference
+uomp authorize ./examples/calendar-agent --scope preference
 ```
 
 This starts the local Auth + Guard server, creates a 30-minute session, and writes the token to `~/.uomp/sessions/<sessionId>.env` with mode `0600`. It prints the exact `source` command and the revoke command. The full token is not printed by default.
@@ -193,16 +197,16 @@ source ~/.uomp/sessions/<sessionId>.env
 node ./examples/calendar-agent/index.js
 ```
 
-Keep the `authorize` terminal open while the agent runs. Use `pnpm cli sessions` to see active sessions and `pnpm cli revoke <sessionId>` to invalidate one immediately.
+Keep the `authorize` terminal open while the agent runs. Use `uomp sessions` to see active sessions and `uomp revoke <sessionId>` to invalidate one immediately. `uomp audit` shows every allow/deny decision; both commands support `--json` for scripts.
 
 If you prefer to run the server separately:
 
 ```bash
 # Terminal 1
-pnpm cli serve
+uomp serve
 
 # Terminal 2
-pnpm cli authorize ./examples/calendar-agent --scope preference --no-server
+uomp authorize ./examples/calendar-agent --scope preference --no-server
 
 # Terminal 3
 source ~/.uomp/sessions/<sessionId>.env
@@ -212,11 +216,11 @@ node ./examples/calendar-agent/index.js
 **Sensitive-data demo: stock analyst**
 
 ```bash
-pnpm cli import ./examples/stock-analyst/sample-risk.json --replace
-pnpm cli import ./examples/stock-analyst/sample-holdings.csv \
+uomp import ./examples/stock-analyst/sample-risk.json --replace
+uomp import ./examples/stock-analyst/sample-holdings.csv \
   --tag portfolio:holdings --sensitivity high --replace
 
-pnpm cli authorize ./examples/stock-analyst \
+uomp authorize ./examples/stock-analyst \
   --scope portfolio:holdings profile:risk
 
 # In a second terminal, source the env file printed above, then run:
@@ -227,7 +231,7 @@ node ./examples/stock-analyst/index.js
 **Developer shortcut**
 
 ```bash
-pnpm cli agent run ./examples/calendar-agent
+uomp agent run ./examples/calendar-agent
 ```
 
 > Admin operations (`createSession`, `grant`, `revoke`) require the local admin token stored at `~/.uomp/.secrets/admin-token`. The Node SDK only reads `UOMP_ADMIN_TOKEN` when the base URL is loopback.
@@ -384,6 +388,7 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 |---|---|
 | 本地记忆存储 | SQLite，支持 CSV/JSON 和 Obsidian/Markdown 导入 |
 | 本地知识导入 | Markdown 目录、frontmatter tags、按路径生成范围、`--dry-run` |
+| 一条命令安装 | `install.sh` 源码构建（Node 22 + git） |
 | Agent 声明 | `uom.json`，声明请求范围 |
 | 授权 | CLI，支持 tag/key/field 范围和 deny 列表 |
 | Capability Token | EdDSA 签名 JWT，默认 30 分钟 |
@@ -398,7 +403,7 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 ### 下一步做什么
 
 1. **MCP server**：Claude Desktop、Cursor 等 MCP 客户端可以直接接入，不需要自定义 SDK。
-2. **可安装的 CLI**：一条命令安装和升级，不需要 clone 仓库。
+2. **打包发布 CLI**：npm 或独立二进制，用户不需要本地构建。
 3. **授权界面**：浏览器里完成授权/撤销、范围预览、审计时间线，不再只靠 CLI。
 4. **更多本地连接器**：在 Obsidian/Markdown 之外继续扩展。
 5. **Python SDK**：去 Agent 开发者最多的地方。
@@ -429,21 +434,24 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 
 ### 快速开始
 
-环境要求：Node.js >= 22，pnpm 9。
+环境要求：Node.js >= 22 和 git。
+
+**安装**
 
 ```bash
-pnpm install
-pnpm build
-pnpm cli init
+curl -fsSL https://www.uomp.org/install.sh | bash
+uomp init
 ```
 
-> 在仓库里通过 `pnpm cli` 运行；全局安装后，同样的命令是 `uomp ...`。
+安装脚本会把 UOMP 克隆到 `~/.uomp/cli`，构建 CLI，并把 `uomp` 链接到 `~/.local/bin`。如果这个目录不在 `PATH` 里，脚本会打印需要添加的那一行。
+
+从源码运行时，执行 `pnpm install && pnpm build`，然后用 `pnpm cli ...` 代替 `uomp ...`。
 
 **导入 Obsidian / Markdown 笔记库**
 
 ```bash
-pnpm cli import ~/Obsidian/MyVault
-pnpm cli import ~/Obsidian/MyVault --dry-run
+uomp import ~/Obsidian/MyVault
+uomp import ~/Obsidian/MyVault --dry-run
 ```
 
 目录路径会变成授权范围：`projects/uomp/plan.md` 会带上 `notes`、`notes/projects`、`notes/projects/uomp` 三个 tag。Frontmatter 里的 `tags`、`title`、`sensitivity` 会保留。
@@ -451,7 +459,7 @@ pnpm cli import ~/Obsidian/MyVault --dry-run
 **授权一个 Agent**
 
 ```bash
-pnpm cli authorize ./examples/calendar-agent --scope preference
+uomp authorize ./examples/calendar-agent --scope preference
 ```
 
 这条命令会启动本地 Auth + Guard server，创建 30 分钟会话，并把 token 写入 `~/.uomp/sessions/<sessionId>.env`（权限 `0600`）。它会打印需要执行的 `source` 命令和撤销命令；默认不打印完整 token。
@@ -463,16 +471,16 @@ source ~/.uomp/sessions/<sessionId>.env
 node ./examples/calendar-agent/index.js
 ```
 
-Agent 运行期间保持 `authorize` 终端打开。`pnpm cli sessions` 查看活跃会话，`pnpm cli revoke <sessionId>` 立即撤销。
+Agent 运行期间保持 `authorize` 终端打开。`uomp sessions` 查看活跃会话，`uomp revoke <sessionId>` 立即撤销。`uomp audit` 查看每次允许/拒绝决策；两个命令都支持 `--json`，方便脚本处理。
 
 如果你想分开运行 server：
 
 ```bash
 # 终端 1
-pnpm cli serve
+uomp serve
 
 # 终端 2
-pnpm cli authorize ./examples/calendar-agent --scope preference --no-server
+uomp authorize ./examples/calendar-agent --scope preference --no-server
 
 # 终端 3
 source ~/.uomp/sessions/<sessionId>.env
@@ -482,11 +490,11 @@ node ./examples/calendar-agent/index.js
 **高敏感数据示例：Stock Analyst**
 
 ```bash
-pnpm cli import ./examples/stock-analyst/sample-risk.json --replace
-pnpm cli import ./examples/stock-analyst/sample-holdings.csv \
+uomp import ./examples/stock-analyst/sample-risk.json --replace
+uomp import ./examples/stock-analyst/sample-holdings.csv \
   --tag portfolio:holdings --sensitivity high --replace
 
-pnpm cli authorize ./examples/stock-analyst \
+uomp authorize ./examples/stock-analyst \
   --scope portfolio:holdings profile:risk
 
 # 在第二个终端 source 上面打印的 env 文件，然后运行：
@@ -497,7 +505,7 @@ node ./examples/stock-analyst/index.js
 **开发者快捷方式**
 
 ```bash
-pnpm cli agent run ./examples/calendar-agent
+uomp agent run ./examples/calendar-agent
 ```
 
 > 管理员操作（`createSession`、`grant`、`revoke`）需要本机管理员令牌，默认存放在 `~/.uomp/.secrets/admin-token`。Node SDK 仅在 base URL 为 loopback 时读取 `UOMP_ADMIN_TOKEN`。
