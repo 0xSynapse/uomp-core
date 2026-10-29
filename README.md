@@ -117,7 +117,7 @@ Design principles:
 | One-command install | `install.sh` source build (Node 22 + git) |
 | Agent manifest | `uom.json` with requested scopes |
 | Authorization | CLI, with tag/key/field scopes and deny lists |
-| MCP | stdio server with `list_memory` and `read_memory` (experimental) |
+| MCP | stdio server with `list_memory`, `search_memory`, and `read_memory` (experimental) |
 | Capability tokens | EdDSA-signed JWT, 30-minute default |
 | Enforcement | Memory Guard: scope filtering, aggregation, audit log |
 | Revocation | `revoke` / `close` invalidate the next request |
@@ -239,7 +239,7 @@ uomp agent run ./examples/calendar-agent
 
 ### Use with Claude Desktop / Cursor (experimental)
 
-The CLI includes a stdio MCP server with two tools: `list_memory` and `read_memory`. Every call still goes through Memory Guard scope, expiry, revocation, and audit.
+The CLI includes a stdio MCP server with three tools: `list_memory`, `search_memory`, and `read_memory`. `list_memory` and `search_memory` return keys and metadata only; `read_memory` returns content. Every call still goes through Memory Guard scope, expiry, revocation, and audit.
 
 ```bash
 uomp import ~/Obsidian/MyVault
@@ -429,7 +429,7 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 | 一条命令安装 | `install.sh` 源码构建（Node 22 + git） |
 | Agent 声明 | `uom.json`，声明请求范围 |
 | 授权 | CLI，支持 tag/key/field 范围和 deny 列表 |
-| MCP | stdio server，提供 `list_memory` 和 `read_memory`（实验） |
+| MCP | stdio server，提供 `list_memory`、`search_memory` 和 `read_memory`（实验） |
 | Capability Token | EdDSA 签名 JWT，默认 30 分钟 |
 | 执行 | Memory Guard：范围过滤、聚合、审计日志 |
 | 撤销 | `revoke` / `close` 后下一个请求失效 |
@@ -551,7 +551,7 @@ uomp agent run ./examples/calendar-agent
 
 ### 配合 Claude Desktop / Cursor 使用（实验）
 
-CLI 内置一个 stdio MCP server，提供两个工具：`list_memory` 和 `read_memory`。每次调用仍然经过 Memory Guard 的范围、过期、撤销和审计。
+CLI 内置一个 stdio MCP server，提供三个工具：`list_memory`、`search_memory` 和 `read_memory`。`list_memory` 和 `search_memory` 只返回 key 和元数据，`read_memory` 返回内容。每次调用仍然经过 Memory Guard 的范围、过期、撤销和审计。
 
 ```bash
 uomp import ~/Obsidian/MyVault
