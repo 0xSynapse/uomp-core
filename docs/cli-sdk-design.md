@@ -7,10 +7,15 @@
 ## 当前 CLI（2026-10）
 
 ```bash
+# 一次性初始化
 uomp init
 uomp import ~/Obsidian/MyVault
-uomp authorize ./agent --scope notes/projects
-uomp serve                    # 与 authorize 分开运行时
+
+# 终端 1
+uomp serve
+
+# 终端 2
+uomp authorize ./agent --scope notes/projects --no-server
 uomp mcp --session ~/.uomp/mcp-client.env --print-config
 uomp sessions
 uomp audit

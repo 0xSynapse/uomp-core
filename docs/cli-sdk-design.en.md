@@ -7,10 +7,15 @@
 ## Current CLI (2026-10)
 
 ```bash
+# once
 uomp init
 uomp import ~/Obsidian/MyVault
-uomp authorize ./agent --scope notes/projects
-uomp serve                    # when running separately
+
+# Terminal 1
+uomp serve
+
+# Terminal 2
+uomp authorize ./agent --scope notes/projects --no-server
 uomp mcp --session ~/.uomp/mcp-client.env --print-config
 uomp sessions
 uomp audit
