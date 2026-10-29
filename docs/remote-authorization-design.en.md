@@ -1,6 +1,7 @@
 # UOMP Remote Authorization Design Document
 
-> Status: Phase 1 implemented (uomp-mvp `apps/gateway`)
+> Status: research/preview. A Phase 1 Gateway + mTLS prototype exists, but remote mode is not the current core user workflow; the current focus is the local CLI + MCP loop. See the [README](../README.md#quick-start) for current usage.
+>
 > Objective: Define the secure authorization, communication, and payload delivery mechanism between a user's local Memory and a remote Agent.
 
 ---
@@ -487,5 +488,5 @@ await agent.output.upload(report, { encryptTo: remoteProfile.encryption.public_k
 ## Related Documents
 
 - [CLI/SDK Design](./cli-sdk-design.en.md)
-- [Protocol Specification](../src/content/spec/draft-00.md)
+- [Protocol Specification](../specs/draft-00.md)
 - [uomp-mvp Reference Implementation](https://github.com/0xaicrypto/uomp-core)

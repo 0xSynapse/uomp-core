@@ -1,5 +1,24 @@
 # UOMP CLI/SDK 设计文档
 
+> **状态：历史设计文档（CLI-first 之前）。** 当前 CLI 主路径是 `init → import → authorize → serve/mcp → sessions / revoke / audit`；`discover`、`connect`、`registry` 是默认隐藏的高级命令，`authorize` 默认写入 `0600` 会话 env 文件而不是打印 JWT。当前用法见 [README](../README.md#quick-start)。
+>
+> 下面保留原始设计分析，作为股票分析 Agent 场景的历史参考。
+
+## 当前 CLI（2026-10）
+
+```bash
+uomp init
+uomp import ~/Obsidian/MyVault
+uomp authorize ./agent --scope notes/projects
+uomp serve                    # 与 authorize 分开运行时
+uomp mcp --session ~/.uomp/mcp-client.env --print-config
+uomp sessions
+uomp audit
+uomp revoke <session-id>
+```
+
+---
+
 > 本文档以**股票分析 Agent** 为具体范例，检查 UOMP 的 CLI 和 SDK 能否满足这类场景的需求，找出设计缺口，并给出针对此类 Agent 的通用 CLI/SDK 设计。
 >
 > 核心结论：
@@ -212,7 +231,7 @@ portfolio:holdings（8 条记录）
 
 #### 5.2.1 导入私有数据
 
-`uomp import` 是通用导入命令，遵循 [UOMP Spec §12 Memory Import Format](/spec/)。
+`uomp import` 是通用导入命令，遵循 [UOMP Spec §12 Memory Import Format](https://www.uomp.org/spec/)。
 
 ```bash
 # 通用用法

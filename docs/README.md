@@ -2,16 +2,26 @@
 
 This directory contains design and implementation documents for the UOMP reference implementation (`uomp-mvp`).
 
-For the protocol specification, see the [UOMP website/spec](https://www.uomp.org/spec/).
+For current usage, start with the [README Quick start](../README.md#quick-start). For the protocol specification, see the [UOMP website/spec](https://www.uomp.org/spec/).
 
-## Documents
+## Current product docs
 
 | Document | 中文 | English |
 |----------|------|---------|
-| CLI/SDK Design | [`cli-sdk-design.md`](./cli-sdk-design.md) | [`cli-sdk-design.en.md`](./cli-sdk-design.en.md) |
+| Quick start / CLI / MCP | [`../README.md`](../README.md) | [`../README.md`](../README.md) |
+| CLI/SDK Design (historical, with current CLI summary) | [`cli-sdk-design.md`](./cli-sdk-design.md) | [`cli-sdk-design.en.md`](./cli-sdk-design.en.md) |
 | SDK Design (API & Architecture) | [`sdk-design.md`](./sdk-design.md) | [`sdk-design.en.md`](./sdk-design.en.md) |
-| Remote Authorization Design | [`remote-authorization-design.md`](./remote-authorization-design.md) | [`remote-authorization-design.en.md`](./remote-authorization-design.en.md) |
 
-- **CLI/SDK Design**: Using the stock analyst Agent as the primary acceptance example.
-- **SDK Design (API & Architecture)**: Complete API reference, architecture, integration patterns, and implementation roadmap for `@uomp/sdk`.
-- **Remote Authorization Design**: Gateway, token refresh, payload encryption, DIDComm migration, and on-chain audit anchoring. **Phase 1 (Gateway + mTLS) is implemented in `apps/gateway`**.
+## Advanced / preview / research docs
+
+These documents are useful context, but they are not the current core workflow:
+
+| Document | 中文 | English | Status |
+|----------|------|---------|--------|
+| Remote Authorization Design | [`remote-authorization-design.md`](./remote-authorization-design.md) | [`remote-authorization-design.en.md`](./remote-authorization-design.en.md) | Preview |
+| Deployment Guide | [`deployment-guide.md`](./deployment-guide.md) | — | Advanced / preview |
+| Browser SDK Design | [`browser-sdk-design.md`](./browser-sdk-design.md) | — | Preview |
+| Store Abstraction Design | [`store-abstraction-design.md`](./store-abstraction-design.md) | — | Research |
+| On-chain Audit Design | [`on-chain-audit-design.md`](./on-chain-audit-design.md) | — | Research |
+
+The core current loop is: import Markdown/CSV/JSON, authorize a scoped session, run the local server, read through Memory Guard, inspect `sessions` / `audit`, and revoke. `uomp mcp` adds an experimental stdio MCP bridge for Claude Desktop, Cursor, and other clients.

@@ -1,5 +1,24 @@
 # UOMP CLI/SDK Design Document
 
+> **Status: historical design note (pre-CLI-first).** The current CLI path is `init → import → authorize → serve/mcp → sessions / revoke / audit`. `discover`, `connect`, and `registry` are advanced commands hidden from default help, and `authorize` writes a `0600` session env file instead of printing the JWT. See the [README](../README.md#quick-start) for current usage.
+>
+> The original analysis below is kept as historical context for the stock-analyst scenario.
+
+## Current CLI (2026-10)
+
+```bash
+uomp init
+uomp import ~/Obsidian/MyVault
+uomp authorize ./agent --scope notes/projects
+uomp serve                    # when running separately
+uomp mcp --session ~/.uomp/mcp-client.env --print-config
+uomp sessions
+uomp audit
+uomp revoke <session-id>
+```
+
+---
+
 > This document uses the **stock analysis agent** as a concrete example to examine whether UOMP's CLI and SDK can meet the needs of such scenarios, identify design gaps, and provide a general CLI/SDK design for this type of agent.
 >
 > Core conclusions:
@@ -212,7 +231,7 @@ portfolio:holdings (8 records)
 
 #### 5.2.1 Import Private Data
 
-`uomp import` is a general import command that follows the [UOMP Spec §12 Memory Import Format](/spec/).
+`uomp import` is a general import command that follows the [UOMP Spec §12 Memory Import Format](https://www.uomp.org/spec/).
 
 ```bash
 # General usage

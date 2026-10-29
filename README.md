@@ -121,7 +121,7 @@ Design principles:
 | Capability tokens | EdDSA-signed JWT, 30-minute default |
 | Enforcement | Memory Guard: scope filtering, aggregation, audit log |
 | Revocation | `revoke` / `close` invalidate the next request |
-| Remote access | Gateway with mTLS and Cloudflare Tunnel |
+| Remote access | Gateway with mTLS and Cloudflare Tunnel (advanced) |
 | SDK | TypeScript (`@uomp/sdk`) |
 | Examples | Calendar agent and stock analyst |
 | Writes | Not available in the MVP; writes return `503` |
@@ -241,16 +241,19 @@ uomp agent run ./examples/calendar-agent
 
 The CLI includes a stdio MCP server with three tools: `list_memory`, `search_memory`, and `read_memory`. `list_memory` and `search_memory` return keys and metadata only; `read_memory` returns content. Every call still goes through Memory Guard scope, expiry, revocation, and audit.
 
+The MCP server is only a stdio bridge; keep the UOMP HTTP server running:
+
 ```bash
+# Terminal 1
+uomp serve
+
+# Terminal 2
 uomp import ~/Obsidian/MyVault
 uomp authorize ./examples/mcp-client \
   --scope notes/projects \
-  --output ~/.uomp/mcp-client.env
-```
+  --output ~/.uomp/mcp-client.env \
+  --no-server
 
-Generate the client config:
-
-```bash
 uomp mcp --session ~/.uomp/mcp-client.env --print-config
 ```
 
@@ -272,7 +275,9 @@ Paste the output into your MCP client config. It looks like:
 }
 ```
 
-Restart the client, then ask it to list notes under `notes/projects` and read one. The MCP server re-reads the env file on startup and before every tool call. With a fixed `--output` path, re-run `uomp authorize` and the next call picks up the new token; if `--session` points at a session ID instead, restart the client. A custom `--output` file is not removed by `uomp revoke`.
+Restart the client, then ask it to list notes under `notes/projects` and read one. Keep the `uomp serve` terminal running. The MCP server re-reads the env file on startup and before every tool call. With a fixed `--output` path, re-run `uomp authorize` and the next call picks up the new token; if `--session` points at a session ID instead, restart the client. A custom `--output` file is not removed by `uomp revoke`.
+
+Validated with the official MCP SDK and OpenCode v2.2.0. Claude Desktop/Cursor validation is still pending.
 
 ### Security model
 
@@ -310,6 +315,7 @@ apps/
 examples/
   calendar-agent/
   stock-analyst/
+  mcp-client/
   browser-dashboard/  (preview)
 specs/
   draft-00.md
@@ -433,7 +439,7 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 | Capability Token | EdDSA 签名 JWT，默认 30 分钟 |
 | 执行 | Memory Guard：范围过滤、聚合、审计日志 |
 | 撤销 | `revoke` / `close` 后下一个请求失效 |
-| 远程访问 | Gateway + mTLS + Cloudflare Tunnel |
+| 远程访问 | Gateway + mTLS + Cloudflare Tunnel（高级） |
 | SDK | TypeScript（`@uomp/sdk`） |
 | 示例 | Calendar Agent、Stock Analyst |
 | 写入 | MVP 不支持，写入返回 `503` |
@@ -553,16 +559,19 @@ uomp agent run ./examples/calendar-agent
 
 CLI 内置一个 stdio MCP server，提供三个工具：`list_memory`、`search_memory` 和 `read_memory`。`list_memory` 和 `search_memory` 只返回 key 和元数据，`read_memory` 返回内容。每次调用仍然经过 Memory Guard 的范围、过期、撤销和审计。
 
+MCP server 只是一个 stdio 桥接；UOMP HTTP server 需要保持运行：
+
 ```bash
+# 终端 1
+uomp serve
+
+# 终端 2
 uomp import ~/Obsidian/MyVault
 uomp authorize ./examples/mcp-client \
   --scope notes/projects \
-  --output ~/.uomp/mcp-client.env
-```
+  --output ~/.uomp/mcp-client.env \
+  --no-server
 
-生成客户端配置：
-
-```bash
 uomp mcp --session ~/.uomp/mcp-client.env --print-config
 ```
 
@@ -584,7 +593,9 @@ uomp mcp --session ~/.uomp/mcp-client.env --print-config
 }
 ```
 
-重启客户端，然后让它列出 `notes/projects` 下的笔记并读取其中一条。MCP server 会在启动时和每次工具调用前重新读取 env 文件。使用固定的 `--output` 路径时，重新执行 `uomp authorize` 后下一次调用会自动使用新 token，不需要重启客户端；如果 `--session` 直接指向 session ID，则需要重启。自定义 `--output` 文件不会被 `uomp revoke` 自动删除。
+重启客户端，然后让它列出 `notes/projects` 下的笔记并读取其中一条。保持 `uomp serve` 终端运行。MCP server 会在启动时和每次工具调用前重新读取 env 文件。使用固定的 `--output` 路径时，重新执行 `uomp authorize` 后下一次调用会自动使用新 token，不需要重启客户端；如果 `--session` 直接指向 session ID，则需要重启。自定义 `--output` 文件不会被 `uomp revoke` 自动删除。
+
+已用官方 MCP SDK 和 OpenCode v2.2.0 验证。Claude Desktop / Cursor 的验证仍在进行。
 
 ### 安全模型
 
@@ -622,6 +633,7 @@ apps/
 examples/
   calendar-agent/
   stock-analyst/
+  mcp-client/
   browser-dashboard/  （预览）
 specs/
   draft-00.md

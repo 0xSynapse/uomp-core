@@ -1,18 +1,20 @@
 # UOMP 部署模式指南
 
+> **状态（2026-10）：** 当前主线是本地 CLI + MCP 闭环；浏览器/钱包模式和远程 Gateway 属于高级或预览能力。日常本地使用请先看 [README Quick start](../README.md#quick-start)。
+
 ## 概述
 
-UOMP 支持三种部署模式。按用户负担从低到高排列：
+UOMP 支持三种部署模式。当前推荐本地模式；远程和浏览器模式属于高级/预览能力。
 
 | 模式 | 用户需要做什么 | 适用场景 |
 |------|--------------|---------|
-| **浏览器模式（零安装）** | 连接钱包 → 签名 | Web App、Dashboard |
-| **本地模式** | 安装 CLI | Node.js Agent 在同一台机器 |
-| **远程模式** | 启动 Gateway + Tunnel | Agent 在云服务 / 另一台机器 |
+| **本地模式（推荐）** | 安装 CLI | Node.js Agent 在同一台机器 |
+| **远程模式（高级）** | 启动 Gateway + Tunnel | Agent 在云服务 / 另一台机器 |
+| **浏览器模式（预览）** | 连接钱包 → 签名 | Web App、Dashboard |
 
 ---
 
-## 1. 浏览器模式（零安装，推荐）
+## 1. 浏览器模式（预览，零安装）
 
 用户不需要安装 CLI、不需要启动 Gateway。只需要浏览器和钱包。
 
@@ -133,7 +135,7 @@ Agent 运行在云服务 / 另一台机器上，通过 Gateway 回连用户本�
 
 ```bash
 # 1. 启动 Auth + Guard 服务（终端 1）
-pnpm --filter @uomp/server start
+uomp serve
 
 # 2. 启动 Gateway + Cloudflare Tunnel（终端 2）
 uomp gateway start
@@ -144,12 +146,13 @@ uomp gateway start
 # export UOMP_BASE_URL="https://happy-frogs-sing.trycloudflare.com"
 
 # 3. 导入数据（如果还没导入）
-pnpm cli import ./holdings.csv --tag portfolio:holdings --sensitivity high --replace
+uomp import ./holdings.csv --tag portfolio:holdings --sensitivity high --replace
 
-# 4. 授权远程 Agent
-pnpm cli authorize ./examples/stock-analyst \
+# 4. 授权远程 Agent（本地 server 已在上一步启动）
+uomp authorize ./examples/stock-analyst \
   --scope portfolio:holdings profile:risk \
-  --output /tmp/uomp-remote.env
+  --output /tmp/uomp-remote.env \
+  --no-server
 
 # 5. 设置环境变量
 source /tmp/uomp-remote.env
@@ -238,13 +241,13 @@ uomp gateway status
 
 ```bash
 # 1. 启动服务
-pnpm --filter @uomp/server start
+uomp serve
 
-# 2. 授权
-pnpm cli authorize ./my-agent --scope my:data --output /tmp/uomp.env --no-server
+# 2. 授权到固定 env 文件
+uomp authorize ./my-agent --scope my:data --output ~/.uomp/my-agent.env --no-server
 
 # 3. 运行
-source /tmp/uomp.env && node ./my-agent/index.js
+source ~/.uomp/my-agent.env && node ./my-agent/index.js
 ```
 
 ---
