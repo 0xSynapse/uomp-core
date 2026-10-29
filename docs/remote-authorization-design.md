@@ -1,6 +1,7 @@
 # UOMP 远程授权设计文档
 
-> 状态：Phase 1 已实现（Gateway + mTLS + Cloudflare Tunnel + Browser CORS）
+> 状态：研究/预览。Phase 1 Gateway + mTLS 原型存在，但远程模式不是当前核心用户工作流；当前主线是本地 CLI + MCP。当前用法见 [README](../README.md#quick-start)。
+>
 > 目标：定义用户本地 Memory 与远程 Agent 之间的安全授权、通信与 Payload 交付机制。
 
 ---
@@ -486,5 +487,5 @@ await agent.output.upload(report, { encryptTo: remoteProfile.encryption.public_k
 ## 相关文档
 
 - [CLI/SDK 设计](./cli-sdk-design.md)
-- [协议规范](../src/content/spec/draft-00.md)
+- [协议规范](../specs/draft-00.md)
 - [uomp-mvp 参考实现](https://github.com/0xaicrypto/uomp-core)
