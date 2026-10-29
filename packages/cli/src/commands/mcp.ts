@@ -1,11 +1,13 @@
 import { Command } from 'commander';
+import { realpathSync } from 'fs';
 import { createInterface } from 'readline';
 import { UompConfig } from '../config.js';
-import { loadSessionCredentials } from '../utils/session-env.js';
+import { loadSessionCredentials, type SessionCredentials } from '../utils/session-env.js';
 
 interface McpOptions {
   session?: string;
   baseUrl?: string;
+  printConfig?: boolean;
 }
 
 interface JsonRpcMessage {
@@ -60,6 +62,7 @@ export class McpCommands {
       .description('Run a stdio MCP server for Claude Desktop / Cursor')
       .option('-s, --session <session>', 'Session ID or path to a session env file')
       .option('--base-url <url>', 'Override the UOMP server URL')
+      .option('--print-config', 'Print an MCP client config and exit')
       .action(async (options: McpOptions) => {
         try {
           const config = new UompConfig();
@@ -85,6 +88,11 @@ export class McpCommands {
       throw new Error(
         'No UOMP session. Pass --session <id|env-file>, or set UOM_TOKEN and UOMP_BASE_URL.'
       );
+    }
+
+    if (options.printConfig) {
+      printClientConfig(credentials);
+      return;
     }
 
     const baseUrl = normalizeBaseUrl(options.baseUrl ?? credentials.baseUrl);
@@ -263,6 +271,29 @@ async function verifySession(baseUrl: string, token: string): Promise<void> {
 function normalizeBaseUrl(value: string): string {
   const withScheme = /^https?:\/\//i.test(value) ? value : `http://${value}`;
   return withScheme.replace(/\/+$/, '');
+}
+
+function printClientConfig(credentials: SessionCredentials): void {
+  const entry = process.argv[1];
+  if (!entry) {
+    throw new Error('Cannot determine the UOMP CLI path.');
+  }
+
+  const cliPath = realpathSync(entry);
+  const isScript = /\.[cm]?js$/.test(cliPath);
+  const command = isScript ? process.execPath : cliPath;
+  const args = [
+    ...(isScript ? [cliPath] : []),
+    'mcp',
+    '--session',
+    credentials.source,
+  ];
+
+  process.stdout.write(`${JSON.stringify({
+    mcpServers: {
+      uomp: { command, args },
+    },
+  }, null, 2)}\n`);
 }
 
 async function readJson(response: Response): Promise<any> {

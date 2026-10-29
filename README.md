@@ -248,14 +248,25 @@ uomp authorize ./examples/mcp-client \
   --output ~/.uomp/mcp-client.env
 ```
 
-Add the server to your MCP client config, using the absolute path to `uomp`:
+Generate the client config:
+
+```bash
+uomp mcp --session ~/.uomp/mcp-client.env --print-config
+```
+
+Paste the output into your MCP client config. It looks like:
 
 ```json
 {
   "mcpServers": {
-    "uomp-notes": {
-      "command": "/Users/me/.local/bin/uomp",
-      "args": ["mcp", "--session", "/Users/me/.uomp/mcp-client.env"]
+    "uomp": {
+      "command": "/usr/local/bin/node",
+      "args": [
+        "/home/me/.uomp/cli/src/packages/cli/dist/cli.js",
+        "mcp",
+        "--session",
+        "/home/me/.uomp/mcp-client.env"
+      ]
     }
   }
 }
@@ -549,14 +560,25 @@ uomp authorize ./examples/mcp-client \
   --output ~/.uomp/mcp-client.env
 ```
 
-把 server 加进 MCP 客户端配置，`command` 用 `uomp` 的绝对路径：
+生成客户端配置：
+
+```bash
+uomp mcp --session ~/.uomp/mcp-client.env --print-config
+```
+
+把输出粘贴到 MCP 客户端配置里。它看起来像：
 
 ```json
 {
   "mcpServers": {
-    "uomp-notes": {
-      "command": "/Users/me/.local/bin/uomp",
-      "args": ["mcp", "--session", "/Users/me/.uomp/mcp-client.env"]
+    "uomp": {
+      "command": "/usr/local/bin/node",
+      "args": [
+        "/home/me/.uomp/cli/src/packages/cli/dist/cli.js",
+        "mcp",
+        "--session",
+        "/home/me/.uomp/mcp-client.env"
+      ]
     }
   }
 }
