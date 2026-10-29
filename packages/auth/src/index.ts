@@ -182,6 +182,8 @@ export class AuthService {
   private createApp(): Hono {
     const app = new Hono();
 
+    app.get('/health', c => c.json({ status: 'ok', service: 'uomp' }));
+
     app.post('/v1/sessions', async c => {
       const unauthorized = this.requireAdmin(c);
       if (unauthorized) return unauthorized;
