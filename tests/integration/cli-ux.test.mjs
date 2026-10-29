@@ -287,7 +287,94 @@ test('authorize revokes the session when the port belongs to another process', a
 
   const sessions = runCli(home, ['sessions', '--all']);
   assert.match(sessions.stdout, /revoked/);
-  assert.doesNotMatch(sessions.stdout, /status: active/);
+  assert.doesNotMatch(sessions.stdout, /\bactive\b/);
+});
+
+test('sessions and audit summarize the authorization loop', async t => {
+  const home = mkdtempSync(join(tmpdir(), 'uomp-cli-inspect-'));
+  const agent = join(home, 'agent');
+  createAgent(agent);
+  mkdirSync(join(home, '.uomp'), { recursive: true });
+
+  const store = new MemoryStore({ dbPath: join(home, '.uomp', 'memory.db') });
+  try {
+    store.set({
+      key: 'note.projects.plan',
+      value: { body: 'Ship the CLI.' },
+      tags: ['notes/projects'],
+      sensitivity: 'low',
+      source: 'user',
+    });
+    store.set({
+      key: 'note.journal.private',
+      value: { body: 'Do not read.' },
+      tags: ['notes/journal'],
+      sensitivity: 'low',
+      source: 'user',
+    });
+  } finally {
+    store.close();
+  }
+
+  const port = await getFreePort();
+  const child = spawn(process.execPath, [CLI, 'serve', '--port', String(port)], {
+    env: { ...process.env, HOME: home, NO_COLOR: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  const exited = new Promise(resolve => child.once('exit', resolve));
+  t.after(async () => {
+    child.kill('SIGTERM');
+    await exited;
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  await waitForServer(port);
+
+  const authorized = runCli(home, [
+    'authorize', agent,
+    '--scope', 'notes/projects',
+    '--port', String(port),
+  ]);
+  assert.equal(authorized.status, 0, authorized.stderr);
+
+  const sessionId = /Session granted: (sess_\S+)/.exec(authorized.stdout)[1];
+  const envFile = readFileSync(join(home, '.uomp', 'sessions', `${sessionId}.env`), 'utf-8');
+  const token = /export UOM_TOKEN='([^']+)'/.exec(envFile)[1];
+  const headers = { Authorization: `Bearer ${token}` };
+
+  assert.equal((await fetch(`http://127.0.0.1:${port}/v1/memory/note.projects.plan`, { headers })).status, 200);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/v1/memory/note.journal.private`, { headers })).status, 403);
+
+  const sessions = runCli(home, ['sessions']);
+  assert.equal(sessions.status, 0, sessions.stderr);
+  assert.match(sessions.stdout, /Active sessions \(1\)/);
+  assert.match(sessions.stdout, /Notes Assistant \(notes-assistant\)/);
+  assert.match(sessions.stdout, /active/);
+  assert.match(sessions.stdout, /scope\s+notes\/projects/);
+  assert.match(sessions.stdout, /last\s+denied read note\.journal\.private/);
+
+  const sessionsJson = JSON.parse(runCli(home, ['sessions', '--json']).stdout);
+  assert.equal(sessionsJson.length, 1);
+  assert.equal(sessionsJson[0].sessionId, sessionId);
+  assert.equal(sessionsJson[0].status, 'active');
+  assert.ok(sessionsJson[0].grantedScopes.read.tags.includes('notes/projects'));
+  assert.equal(sessionsJson[0].lastAccess.allowed, false);
+
+  const audit = runCli(home, ['audit', '--limit', '10']);
+  assert.equal(audit.status, 0, audit.stderr);
+  assert.match(audit.stdout, /Audit log \(2\)/);
+  assert.match(audit.stdout, /allow\s+read\s+notes-assistant\s+note\.projects\.plan/);
+  assert.match(audit.stdout, /deny\s+read\s+notes-assistant\s+note\.journal\.private/);
+  assert.match(audit.stdout, /Key not in authorized scope/);
+
+  const auditJson = JSON.parse(runCli(home, ['audit', '--json']).stdout);
+  assert.equal(auditJson.length, 2);
+  assert.ok(auditJson.some(log => log.allowed === true && log.key === 'note.projects.plan'));
+  assert.ok(auditJson.some(log => log.allowed === false && log.key === 'note.journal.private'));
+
+  const limited = JSON.parse(runCli(home, ['audit', '--json', '--limit', '1']).stdout);
+  assert.equal(limited.length, 1);
 });
 
 test('authorize token works against uomp serve on a custom port', async t => {
