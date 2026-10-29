@@ -9,7 +9,7 @@ The MCP server is a stdio bridge. Keep the local UOMP HTTP server running:
 uomp serve
 
 # Terminal 2
-uomp authorize ./examples/mcp-client \
+uomp authorize \
   --scope notes/projects \
   --output ~/.uomp/mcp-client.env \
   --no-server
