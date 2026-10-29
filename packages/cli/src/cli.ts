@@ -26,6 +26,11 @@ import { StopCommands } from './commands/stop.js';
 import { StartCommands } from './commands/start.js';
 import { parseHost, parsePort } from './utils/server.js';
 
+if (process.platform === 'win32') {
+  console.error('UOMP supports macOS and Linux only. Windows is not supported.');
+  process.exit(1);
+}
+
 const program = new Command();
 
 program

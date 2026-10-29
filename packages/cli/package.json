@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "type": "module",
   "description": "UOMP command-line interface",
+  "os": ["darwin", "linux"],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {

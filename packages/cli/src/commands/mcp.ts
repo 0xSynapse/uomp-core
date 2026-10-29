@@ -665,12 +665,8 @@ function parseTimeoutOption(value?: string): number {
 }
 
 function openUrl(url: string): void {
-  const command = process.platform === 'darwin'
-    ? 'open'
-    : process.platform === 'win32'
-      ? 'cmd'
-      : 'xdg-open';
-  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
+  const command = process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const args = [url];
 
   try {
     const child = spawn(command, args, {

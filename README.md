@@ -164,7 +164,7 @@ They remain in the repository and design docs, but we will not let them delay th
 
 ### Quick start
 
-Requirements: Node.js >= 22 and git.
+Requirements: Node.js >= 22, git, and macOS or Linux. **Windows is not supported.**
 
 **Install**
 
@@ -515,7 +515,7 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 
 ### 快速开始
 
-环境要求：Node.js >= 22 和 git。
+环境要求：Node.js >= 22、git、macOS 或 Linux。**不支持 Windows。**
 
 **安装**
 

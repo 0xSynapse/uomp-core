@@ -150,9 +150,6 @@ export function defaultClientConfigPath(
     if (process.platform === 'darwin') {
       return join(homedir(), 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json');
     }
-    if (process.platform === 'win32') {
-      return join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json');
-    }
     return join(homedir(), '.config', 'Claude', 'claude_desktop_config.json');
   }
 
