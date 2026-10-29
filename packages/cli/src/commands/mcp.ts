@@ -8,7 +8,10 @@ interface McpOptions {
   session?: string;
   baseUrl?: string;
   printConfig?: boolean;
+  client?: string;
 }
+
+type McpClient = 'generic' | 'claude' | 'cursor' | 'opencode';
 
 interface JsonRpcMessage {
   jsonrpc?: string;
@@ -88,6 +91,7 @@ export class McpCommands {
       .option('-s, --session <session>', 'Session ID or path to a session env file')
       .option('--base-url <url>', 'Override the UOMP server URL')
       .option('--print-config', 'Print an MCP client config and exit')
+      .option('--client <client>', 'Config preset: claude, cursor, or opencode')
       .action(async (options: McpOptions) => {
         try {
           const config = new UompConfig();
@@ -121,8 +125,13 @@ export class McpCommands {
 
     this.credentials = credentials;
 
+    const client = parseClient(options.client);
+    if (client !== 'generic' && !options.printConfig) {
+      throw new Error('--client requires --print-config.');
+    }
+
     if (options.printConfig) {
-      printClientConfig(credentials);
+      printClientConfig(credentials, client);
       return;
     }
 
@@ -335,7 +344,14 @@ function normalizeBaseUrl(value: string): string {
   return withScheme.replace(/\/+$/, '');
 }
 
-function printClientConfig(credentials: SessionCredentials): void {
+function parseClient(value?: string): McpClient {
+  if (!value || value === 'generic') return 'generic';
+  if (value === 'claude' || value === 'cursor' || value === 'opencode') return value;
+
+  throw new Error(`Unknown client "${value}". Use claude, cursor, opencode, or generic.`);
+}
+
+function printClientConfig(credentials: SessionCredentials, client: McpClient): void {
   const entry = process.argv[1];
   if (!entry) {
     throw new Error('Cannot determine the UOMP CLI path.');
@@ -351,11 +367,43 @@ function printClientConfig(credentials: SessionCredentials): void {
     credentials.source,
   ];
 
+  if (client === 'opencode') {
+    process.stdout.write(`${JSON.stringify({
+      mcp: {
+        servers: {
+          uomp: {
+            type: 'local',
+            command: [command, ...args],
+            codemode: false,
+          },
+        },
+      },
+    }, null, 2)}\n`);
+    process.stderr.write(`Add to opencode.json (project) or ~/.config/opencode/opencode.json (global).\n`);
+    return;
+  }
+
   process.stdout.write(`${JSON.stringify({
     mcpServers: {
       uomp: { command, args },
     },
   }, null, 2)}\n`);
+
+  if (client === 'claude') {
+    process.stderr.write(`Add to ${claudeConfigPath()}.\n`);
+  } else if (client === 'cursor') {
+    process.stderr.write('Add to .cursor/mcp.json (project) or ~/.cursor/mcp.json (global).\n');
+  }
+}
+
+function claudeConfigPath(): string {
+  if (process.platform === 'darwin') {
+    return '~/Library/Application Support/Claude/claude_desktop_config.json';
+  }
+  if (process.platform === 'win32') {
+    return '%APPDATA%\\Claude\\claude_desktop_config.json';
+  }
+  return '~/.config/Claude/claude_desktop_config.json';
 }
 
 async function readJson(response: Response): Promise<any> {

@@ -176,6 +176,23 @@ test('mcp serves authorized memory over stdio', async t => {
   assert.ok(clientConfig.mcpServers.uomp.args.includes('mcp'));
   assert.equal(clientConfig.mcpServers.uomp.args.at(-1), envPath);
 
+  const opencodeConfig = JSON.parse(runCli(home, [
+    'mcp', '--session', envPath, '--print-config', '--client', 'opencode',
+  ]).stdout);
+  assert.equal(opencodeConfig.mcp.servers.uomp.type, 'local');
+  assert.equal(opencodeConfig.mcp.servers.uomp.codemode, false);
+  assert.ok(opencodeConfig.mcp.servers.uomp.command.includes('mcp'));
+
+  const claudeConfig = JSON.parse(runCli(home, [
+    'mcp', '--session', envPath, '--print-config', '--client', 'claude',
+  ]).stdout);
+  assert.equal(typeof claudeConfig.mcpServers.uomp.command, 'string');
+  assert.ok(Array.isArray(claudeConfig.mcpServers.uomp.args));
+
+  const badClient = runCli(home, ['mcp', '--session', envPath, '--print-config', '--client', 'nope']);
+  assert.equal(badClient.status, 1);
+  assert.match(badClient.stderr, /Unknown client/);
+
   const mcp = startMcp(home, envPath);
   t.after(() => mcp.kill());
 
