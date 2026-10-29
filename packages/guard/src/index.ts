@@ -488,8 +488,12 @@ export class MemoryGuard {
     );
   }
 
-  getAuditLogs(options: { sessionId?: string; agentId?: string; limit?: number } = {}): AuditLogEntry[] {
-    let sql = 'SELECT * FROM audit_logs WHERE 1=1';
+  countAuditLogs(): number {
+    const row = this.db.prepare('SELECT COUNT(*) as cnt FROM audit_logs').get() as { cnt: number };
+    return row.cnt;
+  }
+
+  getAuditLogs(options: { sessionId?: string; agentId?: string; limit?: number } = {}): AuditLogEntry[] {    let sql = 'SELECT * FROM audit_logs WHERE 1=1';
     const params: (string | number)[] = [];
     if (options.sessionId) {
       sql += ' AND session_id = ?';

@@ -169,6 +169,18 @@ export function parseHost(value: string): string {
   return host;
 }
 
+export function findAvailablePort(host = '127.0.0.1'): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const tester = net.createServer();
+    tester.once('error', reject);
+    tester.listen(0, host, () => {
+      const address = tester.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      tester.close(() => resolve(port));
+    });
+  });
+}
+
 export function isLoopbackHost(host: string): boolean {
   return host === '127.0.0.1' || host === 'localhost' || host === '::1';
 }
@@ -189,7 +201,7 @@ async function probeUompServer(url: string): Promise<boolean> {
   }
 }
 
-function isPortAvailable(port: number, host: string): Promise<boolean> {
+export async function isPortAvailable(port: number, host: string): Promise<boolean> {
   return new Promise((resolve, reject) => {
     const tester = net.createServer();
     tester.once('error', (error: NodeJS.ErrnoException) => {

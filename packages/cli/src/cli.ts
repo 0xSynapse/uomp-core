@@ -14,6 +14,8 @@ import { ImportCommands } from './commands/import.js';
 import { GatewayCommands } from './commands/gateway.js';
 import { ServeCommands } from './commands/serve.js';
 import { McpCommands } from './commands/mcp.js';
+import { DemoCommands } from './commands/demo.js';
+import { DoctorCommands } from './commands/doctor.js';
 import { parseHost, parsePort } from './utils/server.js';
 
 const program = new Command();
@@ -43,6 +45,7 @@ program
 
 // New generic import command (supersedes memory import for external data)
 program.addCommand(ImportCommands.get());
+program.addCommand(DemoCommands.get());
 
 program
   .command('registry', { hidden: true })
@@ -151,6 +154,8 @@ program
     ]);
   });
 
+program.addCommand(DoctorCommands.get());
+
 program
   .command('agent', { hidden: true })
   .description('Agent developer commands')
@@ -173,6 +178,7 @@ program
 
 program.addHelpText('after', `
 Core flow:
+  $ uomp demo
   $ uomp init
   $ uomp import ~/Obsidian/MyVault
   $ uomp authorize ./my-agent --scope notes/projects
@@ -180,6 +186,9 @@ Core flow:
 
 Connect an MCP client (experimental):
   $ uomp mcp --session <sessionId>
+
+Check your setup:
+  $ uomp doctor
 
 Advanced commands (hidden): memory, registry, discover, connect, agent, gateway
 Run \`uomp help <command>\` for details.
