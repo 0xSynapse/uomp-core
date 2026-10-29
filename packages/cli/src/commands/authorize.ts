@@ -1,4 +1,5 @@
 import { dirname, join, resolve } from 'path';
+import { existsSync } from 'fs';
 import { chmod, mkdir, rename, rm, writeFile } from 'fs/promises';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
@@ -293,7 +294,10 @@ export class AuthorizeCommands {
     console.log('');
     console.log(chalk.bold('Open a new terminal, then:'));
     console.log(`  source ${shellQuote(envPath)}`);
-    console.log(chalk.gray(`  node ${shellQuote(join(agentPath, 'index.js'))}   # example`));
+    const entryPoint = join(agentPath, 'index.js');
+    if (existsSync(entryPoint)) {
+      console.log(chalk.gray(`  node ${shellQuote(entryPoint)}   # example`));
+    }
 
     if (input.printToken) {
       console.log('');

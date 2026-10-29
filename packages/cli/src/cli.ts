@@ -13,6 +13,7 @@ import { ConnectCommands } from './commands/connect.js';
 import { ImportCommands } from './commands/import.js';
 import { GatewayCommands } from './commands/gateway.js';
 import { ServeCommands } from './commands/serve.js';
+import { McpCommands } from './commands/mcp.js';
 import { parseHost, parsePort } from './utils/server.js';
 
 const program = new Command();
@@ -105,6 +106,7 @@ program
   });
 
 program.addCommand(ServeCommands.get());
+program.addCommand(McpCommands.get());
 
 program
   .command('sessions')
@@ -175,6 +177,9 @@ Core flow:
   $ uomp import ~/Obsidian/MyVault
   $ uomp authorize ./my-agent --scope notes/projects
   $ uomp sessions
+
+Connect an MCP client (experimental):
+  $ uomp mcp --session <sessionId>
 
 Advanced commands (hidden): memory, registry, discover, connect, agent, gateway
 Run \`uomp help <command>\` for details.

@@ -20,7 +20,7 @@ Your memory stays where it is. Agents get temporary, scoped, revocable access �
   <a href="#english">English</a> | <a href="#中文">中文</a>
 </p>
 
-> **Status: early reference implementation, CLI-first.** The local loop works end-to-end: import Obsidian/Markdown notes, grant a scoped session, read through Memory Guard, inspect the audit log, and revoke. MCP integration and a browser consent UI are the next milestone. This is not production-ready yet.
+> **Status: early reference implementation, CLI-first.** The local loop works end-to-end: import Obsidian/Markdown notes, grant a scoped session, read through Memory Guard, inspect the audit log, and revoke. A stdio MCP server is available for early testing; Claude Desktop/Cursor validation and a browser consent UI are next. This is not production-ready yet.
 
 ---
 
@@ -83,7 +83,7 @@ North star:
 4. The agent reads through Memory Guard. Every access is logged.
 5. You revoke. The next request fails with `403`.
 
-The Markdown/Obsidian import and CLI consent loop now work end-to-end. Native Claude Desktop / Cursor support still requires the MCP server, which is the next milestone, along with a browser consent UI.
+The Markdown/Obsidian import and CLI consent loop now work end-to-end. A stdio MCP server is available for early testing; validating it with Claude Desktop and Cursor, plus a browser consent UI, is next.
 
 ### How it works
 
@@ -117,6 +117,7 @@ Design principles:
 | One-command install | `install.sh` source build (Node 22 + git) |
 | Agent manifest | `uom.json` with requested scopes |
 | Authorization | CLI, with tag/key/field scopes and deny lists |
+| MCP | stdio server with `list_memory` and `read_memory` (experimental) |
 | Capability tokens | EdDSA-signed JWT, 30-minute default |
 | Enforcement | Memory Guard: scope filtering, aggregation, audit log |
 | Revocation | `revoke` / `close` invalidate the next request |
@@ -128,7 +129,7 @@ Design principles:
 
 ### What we are building next
 
-1. **MCP server** — Claude Desktop, Cursor, and other MCP clients can connect without a custom SDK.
+1. **MCP hardening** — validate with Claude Desktop/Cursor, then add resources, prompts, and client setup helpers.
 2. **Packaged CLI release** — npm or a standalone binary, so users do not need a local build.
 3. **Consent UI** — browser-based grant/revoke, scope preview, and audit timeline. Not CLI-only.
 4. **More local connectors** — beyond Obsidian/Markdown.
@@ -235,6 +236,32 @@ uomp agent run ./examples/calendar-agent
 ```
 
 > Admin operations (`createSession`, `grant`, `revoke`) require the local admin token stored at `~/.uomp/.secrets/admin-token`. The Node SDK only reads `UOMP_ADMIN_TOKEN` when the base URL is loopback.
+
+### Use with Claude Desktop / Cursor (experimental)
+
+The CLI includes a stdio MCP server with two tools: `list_memory` and `read_memory`. Every call still goes through Memory Guard scope, expiry, revocation, and audit.
+
+```bash
+uomp import ~/Obsidian/MyVault
+uomp authorize ./examples/mcp-client \
+  --scope notes/projects \
+  --output ~/.uomp/mcp-client.env
+```
+
+Add the server to your MCP client config, using the absolute path to `uomp`:
+
+```json
+{
+  "mcpServers": {
+    "uomp-notes": {
+      "command": "/Users/me/.local/bin/uomp",
+      "args": ["mcp", "--session", "/Users/me/.uomp/mcp-client.env"]
+    }
+  }
+}
+```
+
+Restart the client, then ask it to list notes under `notes/projects` and read one. The env file is read when the MCP server starts; after the session expires or is revoked, re-run `uomp authorize` and restart the MCP server. A custom `--output` file is not removed by `uomp revoke`.
 
 ### Security model
 
@@ -357,7 +384,7 @@ UOMP 就是让这句话可执行的那一层。
 4. Agent 通过 Memory Guard 读取，每次访问都有日志。
 5. 你撤销，下一个请求直接 `403`。
 
-Markdown/Obsidian 导入和 CLI 授权闭环现在已经跑通。要让 Claude Desktop / Cursor 原生接入，还需要 MCP server；这是下一个里程碑，浏览器授权界面也在同一阶段。
+Markdown/Obsidian 导入和 CLI 授权闭环现在已经跑通。stdio MCP server 已经可以早期试用；接下来是用 Claude Desktop / Cursor 验证，以及浏览器授权界面。
 
 ### 工作方式
 
@@ -391,6 +418,7 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 | 一条命令安装 | `install.sh` 源码构建（Node 22 + git） |
 | Agent 声明 | `uom.json`，声明请求范围 |
 | 授权 | CLI，支持 tag/key/field 范围和 deny 列表 |
+| MCP | stdio server，提供 `list_memory` 和 `read_memory`（实验） |
 | Capability Token | EdDSA 签名 JWT，默认 30 分钟 |
 | 执行 | Memory Guard：范围过滤、聚合、审计日志 |
 | 撤销 | `revoke` / `close` 后下一个请求失效 |
@@ -402,7 +430,7 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 
 ### 下一步做什么
 
-1. **MCP server**：Claude Desktop、Cursor 等 MCP 客户端可以直接接入，不需要自定义 SDK。
+1. **MCP 完善**：先用 Claude Desktop / Cursor 验证，再补 resources、prompts 和客户端配置助手。
 2. **打包发布 CLI**：npm 或独立二进制，用户不需要本地构建。
 3. **授权界面**：浏览器里完成授权/撤销、范围预览、审计时间线，不再只靠 CLI。
 4. **更多本地连接器**：在 Obsidian/Markdown 之外继续扩展。
@@ -509,6 +537,32 @@ uomp agent run ./examples/calendar-agent
 ```
 
 > 管理员操作（`createSession`、`grant`、`revoke`）需要本机管理员令牌，默认存放在 `~/.uomp/.secrets/admin-token`。Node SDK 仅在 base URL 为 loopback 时读取 `UOMP_ADMIN_TOKEN`。
+
+### 配合 Claude Desktop / Cursor 使用（实验）
+
+CLI 内置一个 stdio MCP server，提供两个工具：`list_memory` 和 `read_memory`。每次调用仍然经过 Memory Guard 的范围、过期、撤销和审计。
+
+```bash
+uomp import ~/Obsidian/MyVault
+uomp authorize ./examples/mcp-client \
+  --scope notes/projects \
+  --output ~/.uomp/mcp-client.env
+```
+
+把 server 加进 MCP 客户端配置，`command` 用 `uomp` 的绝对路径：
+
+```json
+{
+  "mcpServers": {
+    "uomp-notes": {
+      "command": "/Users/me/.local/bin/uomp",
+      "args": ["mcp", "--session", "/Users/me/.uomp/mcp-client.env"]
+    }
+  }
+}
+```
+
+重启客户端，然后让它列出 `notes/projects` 下的笔记并读取其中一条。env 文件只在 MCP server 启动时读取；会话过期或被撤销后，重新执行 `uomp authorize` 并重启 MCP server。自定义 `--output` 文件不会被 `uomp revoke` 自动删除。
 
 ### 安全模型
 
