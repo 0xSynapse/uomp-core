@@ -167,6 +167,16 @@ test('mcp serves authorized memory over stdio', async t => {
   assert.equal(authorized.status, 0, authorized.stderr);
 
   const sessionId = /Session granted: (sess_\S+)/.exec(authorized.stdout)[1];
+
+  const printed = runCli(home, ['mcp', '--session', sessionId, '--print-config']);
+  assert.equal(printed.status, 0, printed.stderr);
+  const clientConfig = JSON.parse(printed.stdout);
+  assert.ok(clientConfig.mcpServers.uomp.args.includes('mcp'));
+  assert.equal(
+    clientConfig.mcpServers.uomp.args.at(-1),
+    join(home, '.uomp', 'sessions', `${sessionId}.env`)
+  );
+
   const mcp = startMcp(home, sessionId);
   t.after(() => mcp.kill());
 
