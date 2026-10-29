@@ -277,7 +277,7 @@ Paste the output into your MCP client config. It looks like:
 
 Restart the client, then ask it to list notes under `notes/projects` and read one. Keep the `uomp serve` terminal running. The MCP server re-reads the env file on startup and before every tool call. With a fixed `--output` path, re-run `uomp authorize` and the next call picks up the new token; if `--session` points at a session ID instead, restart the client. A custom `--output` file is not removed by `uomp revoke`.
 
-Validated with the official MCP SDK and OpenCode v2.2.0. Claude Desktop/Cursor validation is still pending.
+Validated with the official MCP SDK and OpenCode v2.2.0. Claude Desktop/Cursor validation is still pending. For OpenCode, set `"codemode": false` on the server entry to expose the three tools directly.
 
 ### Security model
 
@@ -595,7 +595,7 @@ uomp mcp --session ~/.uomp/mcp-client.env --print-config
 
 重启客户端，然后让它列出 `notes/projects` 下的笔记并读取其中一条。保持 `uomp serve` 终端运行。MCP server 会在启动时和每次工具调用前重新读取 env 文件。使用固定的 `--output` 路径时，重新执行 `uomp authorize` 后下一次调用会自动使用新 token，不需要重启客户端；如果 `--session` 直接指向 session ID，则需要重启。自定义 `--output` 文件不会被 `uomp revoke` 自动删除。
 
-已用官方 MCP SDK 和 OpenCode v2.2.0 验证。Claude Desktop / Cursor 的验证仍在进行。
+已用官方 MCP SDK 和 OpenCode v2.2.0 验证。Claude Desktop / Cursor 的验证仍在进行。OpenCode 中把 server 条目的 `"codemode"` 设为 `false`，三个工具会直接暴露。
 
 ### 安全模型
 
