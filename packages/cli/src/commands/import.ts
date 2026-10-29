@@ -1,11 +1,12 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { readFile } from 'fs/promises';
+import { readFile, stat } from 'fs/promises';
 import { parse } from 'csv-parse/sync';
 import { UompConfig } from '../config.js';
 import { MemoryStore } from '@uomp/store';
 import type { MemoryItem, Sensitivity } from '@uomp/core';
 import { inferSensitivity } from '@uomp/core';
+import { importMarkdown, type MarkdownImportResult } from '../utils/markdown.js';
 
 interface ImportOptions {
   tag?: string;
@@ -20,15 +21,15 @@ interface ImportOptions {
 export class ImportCommands {
   static get(): Command {
     return new Command('import')
-      .description('Import memory items from CSV or JSON')
-      .argument('[file]', 'File path (omit for interactive)')
-      .option('-t, --tag <tag>', 'Memory tag')
+      .description('Import memory items from CSV, JSON, or a Markdown folder')
+      .argument('[file]', 'File or directory path (omit for interactive)')
+      .option('-t, --tag <tag>', 'Base memory tag (default: notes for Markdown)')
       .option('-s, --sensitivity <level>', 'Sensitivity level (low/medium/high)')
       .option('-k, --key-field <field>', 'Column to use as item key')
-      .option('-f, --format <format>', 'File format (csv/json)')
+      .option('-f, --format <format>', 'File format (csv/json/markdown)')
       .option('-m, --map <mapping>', 'Field mapping e.g. key=symbol', collect, [])
       .option('--dry-run', 'Preview without writing')
-      .option('--replace', 'Replace existing items for the tag')
+      .option('--replace', 'Replace existing items for the tag (CSV/JSON)')
       .action(async (file: string | undefined, options: ImportOptions) => {
         const config = new UompConfig();
         await config.init();
@@ -43,14 +44,40 @@ export class ImportCommands {
   }
 
   async run(store: MemoryStore, file: string | undefined, options: ImportOptions): Promise<void> {
-    const format = options.format ?? this.inferFormat(file);
-    let tag = options.tag;
-    let sensitivity = options.sensitivity as Sensitivity | undefined;
-
     if (!file) {
       console.log(chalk.red('Interactive import not yet implemented'));
       return;
     }
+
+    const fileInfo = await stat(file).catch(() => null);
+    if (!fileInfo) {
+      console.log(chalk.red(`File or directory not found: ${file}`));
+      return;
+    }
+
+    const format = options.format ?? this.inferFormat(file);
+    const markdownTarget =
+      fileInfo.isDirectory() ||
+      (fileInfo.isFile() && file.toLowerCase().endsWith('.md')) ||
+      format === 'markdown' ||
+      format === 'md';
+
+    if (markdownTarget) {
+      try {
+        const result = await importMarkdown(store, file, {
+          tag: options.tag,
+          sensitivity: options.sensitivity as Sensitivity | undefined,
+          dryRun: options.dryRun,
+        });
+        this.printMarkdownResult(result, options.dryRun === true);
+      } catch (error) {
+        console.log(chalk.red(error instanceof Error ? error.message : String(error)));
+      }
+      return;
+    }
+
+    let tag = options.tag;
+    let sensitivity = options.sensitivity as Sensitivity | undefined;
 
     const content = await readFile(file, 'utf-8');
 
@@ -134,6 +161,36 @@ export class ImportCommands {
     }
 
     console.log(chalk.green(`Imported ${items.length} items into tag "${tag}" (sensitivity: ${sensitivity})`));
+  }
+
+  private printMarkdownResult(result: MarkdownImportResult, dryRun: boolean): void {
+    if (result.notes.length === 0) {
+      console.log(chalk.yellow(`No Markdown notes found under ${result.target}`));
+    } else {
+      const count = `${result.notes.length} note${result.notes.length === 1 ? '' : 's'}`;
+      console.log(chalk.green(`${dryRun ? 'Dry run: would import' : 'Imported'} ${count} from ${result.target}`));
+      console.log(chalk.gray(`  new: ${result.created} · updated: ${result.updated}${result.skipped.length ? ` · skipped: ${result.skipped.length}` : ''}`));
+
+      const visibleTags = result.tags.slice(0, 6);
+      const moreTags = result.tags.length - visibleTags.length;
+      console.log(chalk.gray(`  tags: ${visibleTags.join(', ')}${moreTags > 0 ? ` … (+${moreTags})` : ''}`));
+
+      if (dryRun) {
+        for (const note of result.notes.slice(0, 10)) {
+          console.log(chalk.gray(`  ${note.key}  ${note.title}`));
+        }
+        if (result.notes.length > 10) {
+          console.log(chalk.gray(`  … ${result.notes.length - 10} more`));
+        }
+      }
+    }
+
+    for (const skipped of result.skipped.slice(0, 5)) {
+      console.log(chalk.yellow(`  skipped ${skipped.path}: ${skipped.reason}`));
+    }
+    if (result.skipped.length > 5) {
+      console.log(chalk.yellow(`  … ${result.skipped.length - 5} more skipped`));
+    }
   }
 
   private recordToMemoryItem(
