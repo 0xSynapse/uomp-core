@@ -272,7 +272,7 @@ Paste the output into your MCP client config. It looks like:
 }
 ```
 
-Restart the client, then ask it to list notes under `notes/projects` and read one. The env file is read when the MCP server starts; after the session expires or is revoked, re-run `uomp authorize` and restart the MCP server. A custom `--output` file is not removed by `uomp revoke`.
+Restart the client, then ask it to list notes under `notes/projects` and read one. The MCP server re-reads the env file on startup and before every tool call. With a fixed `--output` path, re-run `uomp authorize` and the next call picks up the new token; if `--session` points at a session ID instead, restart the client. A custom `--output` file is not removed by `uomp revoke`.
 
 ### Security model
 
@@ -584,7 +584,7 @@ uomp mcp --session ~/.uomp/mcp-client.env --print-config
 }
 ```
 
-重启客户端，然后让它列出 `notes/projects` 下的笔记并读取其中一条。env 文件只在 MCP server 启动时读取；会话过期或被撤销后，重新执行 `uomp authorize` 并重启 MCP server。自定义 `--output` 文件不会被 `uomp revoke` 自动删除。
+重启客户端，然后让它列出 `notes/projects` 下的笔记并读取其中一条。MCP server 会在启动时和每次工具调用前重新读取 env 文件。使用固定的 `--output` 路径时，重新执行 `uomp authorize` 后下一次调用会自动使用新 token，不需要重启客户端；如果 `--session` 直接指向 session ID，则需要重启。自定义 `--output` 文件不会被 `uomp revoke` 自动删除。
 
 ### 安全模型
 

@@ -100,12 +100,18 @@ export class McpCommands {
   }
 
   private config: UompConfig;
+  private sessionInput?: string;
+  private baseUrlOverride?: string;
+  private credentials!: SessionCredentials;
 
   constructor(config: UompConfig) {
     this.config = config;
   }
 
   async serve(options: McpOptions): Promise<void> {
+    this.sessionInput = options.session;
+    this.baseUrlOverride = options.baseUrl;
+
     const credentials = await loadSessionCredentials(this.config, options.session);
     if (!credentials) {
       throw new Error(
@@ -113,26 +119,50 @@ export class McpCommands {
       );
     }
 
+    this.credentials = credentials;
+
     if (options.printConfig) {
       printClientConfig(credentials);
       return;
     }
 
-    const baseUrl = normalizeBaseUrl(options.baseUrl ?? credentials.baseUrl);
-    await verifySession(baseUrl, credentials.token);
-    process.stderr.write(`UOMP MCP server ready: ${baseUrl} (${credentials.source})\n`);
+    try {
+      await verifySession(this.connectionUrl(), credentials.token);
+    } catch (error) {
+      process.stderr.write(
+        `UOMP MCP warning: ${error instanceof Error ? error.message : String(error)}\n` +
+        'The server will re-read the session file on the next tool call.\n'
+      );
+    }
 
-    await this.run(baseUrl, credentials.token);
+    process.stderr.write(`UOMP MCP server ready: ${this.connectionUrl()} (${credentials.source})\n`);
+
+    await this.run();
   }
 
-  private async run(baseUrl: string, token: string): Promise<void> {
+  private connectionUrl(): string {
+    return normalizeBaseUrl(this.baseUrlOverride ?? this.credentials.baseUrl);
+  }
+
+  private async refreshCredentials(): Promise<void> {
+    if (!this.sessionInput) return;
+
+    try {
+      const next = await loadSessionCredentials(this.config, this.sessionInput);
+      if (next) this.credentials = next;
+    } catch {
+      // Keep the current credentials; the tool call will report the auth error.
+    }
+  }
+
+  private async run(): Promise<void> {
     const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
     let queue = Promise.resolve();
 
     input.on('line', line => {
       if (!line.trim()) return;
       queue = queue
-        .then(() => this.handleLine(line, baseUrl, token))
+        .then(() => this.handleLine(line))
         .catch(error => {
           process.stderr.write(`UOMP MCP error: ${error instanceof Error ? error.message : String(error)}\n`);
         });
@@ -145,7 +175,7 @@ export class McpCommands {
     });
   }
 
-  private async handleLine(line: string, baseUrl: string, token: string): Promise<void> {
+  private async handleLine(line: string): Promise<void> {
     let message: JsonRpcMessage;
 
     try {
@@ -165,7 +195,8 @@ export class McpCommands {
     }
 
     try {
-      const result = await this.dispatch(message, baseUrl, token);
+      await this.refreshCredentials();
+      const result = await this.dispatch(message);
       sendResult(message.id, result);
     } catch (error) {
       if (error instanceof RpcError) {
@@ -176,11 +207,7 @@ export class McpCommands {
     }
   }
 
-  private async dispatch(
-    message: JsonRpcMessage,
-    baseUrl: string,
-    token: string
-  ): Promise<unknown> {
+  private async dispatch(message: JsonRpcMessage): Promise<unknown> {
     switch (message.method) {
       case 'initialize':
         return {
@@ -198,22 +225,20 @@ export class McpCommands {
         return { tools: TOOLS };
 
       case 'tools/call':
-        return this.callTool(message.params, baseUrl, token);
+        return this.callTool(message.params);
 
       default:
         throw new RpcError(-32601, `Method not found: ${message.method}`);
     }
   }
 
-  private async callTool(
-    params: Record<string, unknown> | undefined,
-    baseUrl: string,
-    token: string
-  ): Promise<unknown> {
+  private async callTool(params: Record<string, unknown> | undefined): Promise<unknown> {
     const name = typeof params?.name === 'string' ? params.name : '';
     const args = (params?.arguments && typeof params.arguments === 'object')
       ? params.arguments as Record<string, unknown>
       : {};
+    const baseUrl = this.connectionUrl();
+    const token = this.credentials.token;
 
     if (name === 'list_memory') {
       const tag = typeof args.tag === 'string' ? args.tag.trim() : '';
@@ -261,16 +286,15 @@ export class McpCommands {
         return toolError('The "key" argument is required.');
       }
 
-      const response = await fetch(`${baseUrl}/v1/memory/${encodeURIComponent(key)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const body = await readJson(response);
-
-      if (!response.ok) {
-        return toolError(formatHttpError(response, body));
+      const response = await requestJson(`${baseUrl}/v1/memory/${encodeURIComponent(key)}`, token);
+      if (!response.response) {
+        return toolError(response.error ?? 'Request failed.');
+      }
+      if (!response.response.ok) {
+        return toolError(formatHttpError(response.response, response.body));
       }
 
-      return toolResult(JSON.stringify(body, null, 2));
+      return toolResult(JSON.stringify(response.body, null, 2));
     }
 
     throw new RpcError(-32602, `Unknown tool: ${name || '(missing)'}`);
@@ -350,16 +374,29 @@ async function fetchItemsByTag(
   const url = new URL(`${baseUrl}/v1/memory`);
   url.searchParams.set('tag', tag);
 
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const body = await readJson(response);
-
-  if (!response.ok) {
-    return { error: formatHttpError(response, body) };
+  const result = await requestJson(url, token);
+  if (!result.response) {
+    return { error: result.error };
+  }
+  if (!result.response.ok) {
+    return { error: formatHttpError(result.response, result.body) };
   }
 
-  return { items: Array.isArray(body?.items) ? body.items : [] };
+  return { items: Array.isArray(result.body?.items) ? result.body.items : [] };
+}
+
+async function requestJson(
+  input: string | URL,
+  token: string
+): Promise<{ response?: Response; body?: any; error?: string }> {
+  try {
+    const response = await fetch(input, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return { response, body: await readJson(response) };
+  } catch {
+    return { error: `Cannot reach UOMP at ${String(input)}. Start it with: uomp serve` };
+  }
 }
 
 function summarizeItem(item: any): Record<string, unknown> {
