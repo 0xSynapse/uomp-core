@@ -488,5 +488,5 @@ await agent.output.upload(report, { encryptTo: remoteProfile.encryption.public_k
 ## Related Documents
 
 - [CLI/SDK Design](./cli-sdk-design.en.md)
-- [Protocol Specification](../specs/draft-00.md)
+- [Protocol Specification](../specs/draft-00.en.md)
 - [uomp-mvp Reference Implementation](https://github.com/0xaicrypto/uomp-core)
