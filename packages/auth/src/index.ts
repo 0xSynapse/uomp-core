@@ -450,6 +450,12 @@ export class AuthService {
     return row ? this.deserializeSession(row) : null;
   }
 
+  listSessions(options: { includeClosed?: boolean } = {}): Session[] {
+    const where = options.includeClosed ? '' : "WHERE status = 'active'";
+    const rows = this.db.prepare(`SELECT * FROM sessions ${where} ORDER BY created_at DESC`).all() as Record<string, string>[];
+    return rows.map(row => this.deserializeSession(row));
+  }
+
   isTokenBlacklisted(sessionId: string): boolean {
     const row = this.db.prepare('SELECT 1 FROM token_blacklist WHERE session_id = ?').get(sessionId);
     return !!row;

@@ -7,6 +7,13 @@ import { UompConfig } from '../config.js';
 import { AuthService } from '@uomp/auth';
 import { MemoryGuard } from '@uomp/guard';
 import { JWTTokenIssuer } from '@uomp/token';
+import {
+  formatClock,
+  formatDateTime,
+  formatRemaining,
+  formatScopes,
+  sanitizeText,
+} from '../utils/format.js';
 
 export class SessionsCommands {
   private static async getServices(): Promise<{ config: UompConfig; auth: AuthService; guard: MemoryGuard }> {
@@ -23,30 +30,78 @@ export class SessionsCommands {
     return new Command('list')
       .description('List active sessions')
       .option('-a, --all', 'Include closed sessions')
-      .action(async (options: { all?: boolean }) => {
+      .option('--json', 'Output JSON')
+      .action(async (options: { all?: boolean; json?: boolean }) => {
         const { auth, guard } = await this.getServices();
         try {
-          const db = (auth as unknown as { db: { prepare: (sql: string) => { all: () => Record<string, string>[] } } }).db;
-          const statusFilter = options.all ? '' : "WHERE status = 'active'";
-          const rows = db.prepare(`SELECT * FROM sessions ${statusFilter} ORDER BY created_at DESC`).all();
+          const sessions = auth.listSessions({ includeClosed: options.all });
+          const views = sessions.map(session => {
+            const remaining = formatRemaining(session.expiresAt);
+            const status = session.status === 'active' && remaining === 'expired'
+              ? 'expired'
+              : session.status;
+            const lastAccess = guard.getLastAccessForSession(session.sessionId);
 
-          if (rows.length === 0) {
-            console.log(chalk.gray('No sessions found.'));
+            return {
+              sessionId: session.sessionId,
+              agentId: session.agentId,
+              agentName: session.agentName,
+              status,
+              createdAt: session.createdAt,
+              expiresAt: session.expiresAt,
+              closedAt: session.closedAt,
+              remaining,
+              grantedScopes: session.grantedScopes,
+              lastAccess: lastAccess
+                ? {
+                    at: lastAccess.timestamp,
+                    action: lastAccess.action,
+                    target: lastAccess.endpoint,
+                    allowed: lastAccess.allowed,
+                    reason: lastAccess.reason,
+                  }
+                : null,
+            };
+          }).filter(view => options.all || view.status === 'active');
+
+          if (views.length === 0) {
+            if (options.json) {
+              console.log('[]');
+            } else {
+              console.log(chalk.gray('No sessions found.'));
+            }
             return;
           }
 
-          console.log(chalk.bold(options.all ? 'All sessions:' : 'Active sessions:'));
-          for (const row of rows) {
-            const lastAccess = guard.getLastAccessForSession(row.session_id);
-            const isActive = row.status === 'active';
-            const expiresAt = row.expires_at ? new Date(row.expires_at) : null;
-            const now = new Date();
-            const remaining = expiresAt ? Math.max(0, Math.floor((expiresAt.getTime() - now.getTime()) / 60000)) : 0;
-            const statusLabel = isActive ? chalk.green('active') : chalk.gray(row.status);
+          if (options.json) {
+            console.log(JSON.stringify(views, null, 2));
+            return;
+          }
 
-            console.log(`${chalk.cyan(row.session_id)} | ${row.agent_id} | status: ${statusLabel} | remaining: ${isActive ? `${remaining} min` : '-'}`);
-            if (lastAccess) {
-              console.log(`  last access: ${lastAccess.timestamp}  ${lastAccess.action} ${lastAccess.endpoint ?? ''}`);
+          const heading = options.all ? 'All sessions' : 'Active sessions';
+          console.log(`${chalk.bold(heading)} ${chalk.gray(`(${views.length})`)}`);
+
+          for (const view of views) {
+            const agent = view.agentName
+              ? `${sanitizeText(view.agentName)} (${sanitizeText(view.agentId)})`
+              : sanitizeText(view.agentId);
+            const status = colorStatus(view.status);
+            const suffix = view.status === 'active' ? chalk.gray(` · ${view.remaining}`) : '';
+
+            console.log('');
+            console.log(`${chalk.cyan(view.sessionId)}  ${agent}  ${status}${suffix}`);
+            console.log(`  ${chalk.gray('scope')}    ${formatScopes(view.grantedScopes)}`);
+            console.log(`  ${chalk.gray('expires')}  ${formatDateTime(view.expiresAt)}`);
+
+            if (view.closedAt) {
+              console.log(`  ${chalk.gray('closed')}   ${formatDateTime(view.closedAt)}`);
+            }
+
+            if (view.lastAccess) {
+              const outcome = view.lastAccess.allowed ? chalk.green('allowed') : chalk.red('denied');
+              const target = view.lastAccess.target ? ` ${sanitizeText(view.lastAccess.target)}` : '';
+              const when = formatClock(view.lastAccess.at);
+              console.log(`  ${chalk.gray('last')}     ${outcome} ${view.lastAccess.action}${target} · ${when}`);
             }
           }
         } finally {
@@ -66,6 +121,7 @@ export class SessionsCommands {
           const session = auth.revokeSession(sessionId);
           if (session) {
             console.log(chalk.green(`Revoked session: ${sessionId}`));
+            console.log(chalk.gray("The agent's next request will fail with 403."));
 
             const envPath = join(config.sessionsDir, `${sessionId}.env`);
             if (existsSync(envPath)) {
@@ -82,4 +138,10 @@ export class SessionsCommands {
         }
       });
   }
+}
+
+function colorStatus(status: string): string {
+  if (status === 'active') return chalk.green(status);
+  if (status === 'expired' || status === 'revoked') return chalk.red(status);
+  return chalk.gray(status);
 }

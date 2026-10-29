@@ -110,10 +110,16 @@ program
   .command('sessions')
   .description('List active sessions')
   .option('-a, --all', 'Include closed sessions')
-  .action(async (options: { all?: boolean }) => {
+  .option('--json', 'Output JSON')
+  .action(async (options: { all?: boolean; json?: boolean }) => {
     // Reuse the list command action manually
     const cmd = SessionsCommands.list();
-    await cmd.parseAsync(['node', 'uomp', ...(options.all ? ['--all'] : [])]);
+    await cmd.parseAsync([
+      'node',
+      'uomp',
+      ...(options.all ? ['--all'] : []),
+      ...(options.json ? ['--json'] : []),
+    ]);
   });
 
 program
@@ -130,7 +136,8 @@ program
   .option('-s, --session <sessionId>', 'Filter by session ID')
   .option('-a, --agent <agentId>', 'Filter by agent ID')
   .option('-l, --limit <number>', 'Limit number of results', '50')
-  .action(async (options: { session?: string; agent?: string; limit?: string }) => {
+  .option('--json', 'Output JSON')
+  .action(async (options: { session?: string; agent?: string; limit?: string; json?: boolean }) => {
     const cmd = AuditCommands.list();
     await cmd.parseAsync([
       'node',
@@ -138,6 +145,7 @@ program
       ...(options.session ? ['--session', options.session] : []),
       ...(options.agent ? ['--agent', options.agent] : []),
       ...(options.limit ? ['--limit', options.limit] : []),
+      ...(options.json ? ['--json'] : []),
     ]);
   });
 

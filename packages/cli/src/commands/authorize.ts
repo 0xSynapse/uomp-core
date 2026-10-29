@@ -16,6 +16,7 @@ import {
   type ServerStartResult,
   type UompRuntime,
 } from '../utils/server.js';
+import { formatDateTime, formatScopes, sanitizeText } from '../utils/format.js';
 
 export interface AuthorizeOptions {
   scope?: string[];
@@ -47,7 +48,7 @@ export class AuthorizeCommands {
     const identity = verification.valid
       ? chalk.green(`verified via ${verification.method}`)
       : manifest.identity
-        ? chalk.yellow(`unverified (${sanitizeComment(verification.error ?? 'unknown error')})`)
+        ? chalk.yellow(`unverified (${sanitizeText(verification.error ?? 'unknown error')})`)
         : chalk.gray('unsigned (no identity proof)');
 
     const grantedScopes = options.scope && options.scope.length > 0
@@ -147,9 +148,9 @@ export class AuthorizeCommands {
       return emptyScopes();
     }
 
-    console.log(chalk.bold(`\nAgent "${sanitizeComment(manifest.agent.name)}" requests access to:`));
-    console.log(`  Publisher: ${sanitizeComment(manifest.agent.publisher ?? 'Unknown')}`);
-    console.log(`  ${sanitizeComment(manifest.agent.description ?? 'No description')}`);
+    console.log(chalk.bold(`\nAgent "${sanitizeText(manifest.agent.name)}" requests access to:`));
+    console.log(`  Publisher: ${sanitizeText(manifest.agent.publisher ?? 'Unknown')}`);
+    console.log(`  ${sanitizeText(manifest.agent.description ?? 'No description')}`);
 
     for (const tag of readTags) {
       const sensitivity = inferSensitivity(tag);
@@ -158,7 +159,7 @@ export class AuthorizeCommands {
         : sensitivity === 'medium'
           ? chalk.yellow('medium')
           : chalk.green('low');
-      console.log(`  [${levelLabel}] ${sanitizeComment(tag)}`);
+      console.log(`  [${levelLabel}] ${sanitizeText(tag)}`);
 
       if (sensitivity === 'high') {
         const fields = manifest.requestedScopes.read.fields?.[tag];
@@ -247,9 +248,9 @@ export class AuthorizeCommands {
   ): Promise<void> {
     await mkdir(dirname(envPath), { recursive: true, mode: 0o700 });
     const envBlock = [
-      `# UOMP session ${sanitizeComment(sessionId)}`,
-      `# agent: ${sanitizeComment(agentId)}`,
-      `# expires: ${sanitizeComment(expiresAt)}`,
+      `# UOMP session ${sanitizeText(sessionId)}`,
+      `# agent: ${sanitizeText(agentId)}`,
+      `# expires: ${sanitizeText(expiresAt)}`,
       `export UOM_TOKEN=${shellQuote(token)}`,
       `export UOMP_BASE_URL=${shellQuote(this.config.serverUrl)}`,
       '',
@@ -281,9 +282,9 @@ export class AuthorizeCommands {
     const { manifest, agentPath, sessionId, expiresAt, durationMinutes, scopes, envPath } = input;
 
     console.log(chalk.green(`Session granted: ${sessionId}`));
-    console.log(`  Agent     ${sanitizeComment(manifest.agent.name)} (${sanitizeComment(manifest.agent.id)})`);
+    console.log(`  Agent     ${sanitizeText(manifest.agent.name)} (${sanitizeText(manifest.agent.id)})`);
     console.log(`  Scope     ${formatScopes(scopes)}`);
-    console.log(`  Expires   ${formatDate(expiresAt)} (${durationMinutes} min)`);
+    console.log(`  Expires   ${formatDateTime(expiresAt)} (${durationMinutes} min)`);
     console.log(`  Identity  ${input.identity}`);
     console.log('');
 
@@ -323,45 +324,6 @@ function parseDuration(value?: string): number {
   return minutes;
 }
 
-function formatScopes(scopes: Scopes): string {
-  const read = scopes.read;
-  const parts: string[] = [];
-
-  if (read.tags.length > 0) {
-    parts.push(preview(read.tags, 4));
-  }
-  if (read.keys.length > 0) {
-    parts.push(`${read.keys.length} explicit key${read.keys.length === 1 ? '' : 's'}`);
-  }
-  if (parts.length === 0) {
-    parts.push('no read scope');
-  }
-  if (read.denyTags.length > 0) {
-    parts.push(`except ${preview(read.denyTags, 3)}`);
-  }
-
-  return parts.join(' · ');
-}
-
-function preview(items: string[], limit: number): string {
-  const visible = items.slice(0, limit).map(sanitizeComment).join(', ');
-  const remaining = items.length - limit;
-  return remaining > 0 ? `${visible} +${remaining} more` : visible;
-}
-
-function formatDate(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
-    `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-function sanitizeComment(value: string): string {
-  return value.replace(/[\r\n\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 120);
 }

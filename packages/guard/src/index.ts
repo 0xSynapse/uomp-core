@@ -530,18 +530,22 @@ export class MemoryGuard {
     }));
   }
 
-  getLastAccessForSession(sessionId: string): { timestamp?: string; action?: string; endpoint?: string } | null {
-    const row = this.db.prepare('SELECT timestamp, action, key, tags FROM audit_logs WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1').get(sessionId) as {
+  getLastAccessForSession(sessionId: string): { timestamp?: string; action?: string; endpoint?: string; allowed?: boolean; reason?: string } | null {
+    const row = this.db.prepare('SELECT timestamp, action, key, tags, allowed, reason FROM audit_logs WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1').get(sessionId) as {
       timestamp: string;
       action: string;
       key: string | null;
       tags: string | null;
+      allowed: number;
+      reason: string;
     } | undefined;
     if (!row) return null;
     return {
       timestamp: row.timestamp,
       action: row.action,
       endpoint: row.key ?? (row.tags ? JSON.parse(row.tags)[0] : undefined),
+      allowed: Boolean(row.allowed),
+      reason: row.reason,
     };
   }
 
