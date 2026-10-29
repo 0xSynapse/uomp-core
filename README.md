@@ -20,7 +20,7 @@ Your memory stays where it is. Agents get temporary, scoped, revocable access �
   <a href="#english">English</a> | <a href="#中文">中文</a>
 </p>
 
-> **Status: early reference implementation, CLI-first.** The local loop works end-to-end: import Obsidian/Markdown notes, grant a scoped session, read through Memory Guard, inspect the audit log, and revoke. A stdio MCP server is available for early testing; Claude Desktop/Cursor validation and a browser consent UI are next. This is not production-ready yet.
+> **Status: early reference implementation, CLI-first.** The local loop works end-to-end: import Obsidian/Markdown notes, grant a scoped session, read through Memory Guard, inspect the audit log, and revoke. A stdio MCP server is available for early testing; Claude Desktop/Cursor validation and a packaged CLI are next. This is not production-ready yet.
 
 ---
 
@@ -83,7 +83,7 @@ North star:
 4. The agent reads through Memory Guard. Every access is logged.
 5. You revoke. The next request fails with `403`.
 
-The Markdown/Obsidian import and CLI consent loop now work end-to-end. A stdio MCP server is available for early testing; validating it with Claude Desktop and Cursor, plus a browser consent UI, is next.
+The Markdown/Obsidian import and CLI consent loop now work end-to-end. A stdio MCP server is available for early testing; validating it with Claude Desktop and Cursor, and packaging the CLI, are next.
 
 ### How it works
 
@@ -131,10 +131,9 @@ Design principles:
 
 1. **MCP hardening** — validate with Claude Desktop/Cursor, then add resources, prompts, and client setup helpers.
 2. **Packaged CLI release** — npm or a standalone binary, so users do not need a local build.
-3. **Consent UI** — browser-based grant/revoke, scope preview, and audit timeline. Not CLI-only.
-4. **More local connectors** — beyond Obsidian/Markdown.
-5. **Python SDK** — meet agent developers where most agents are built.
-6. **Design partner program** — 10 users with a real weekly workflow.
+3. **More local connectors** — beyond Obsidian/Markdown.
+4. **Python SDK** — meet agent developers where most agents are built.
+5. **Design partner program** — 10 users with a real weekly workflow.
 
 ### How we will measure the first milestone
 
@@ -152,7 +151,6 @@ These are experiments or research directions, not the current product roadmap:
 
 - FHE (homomorphic encryption)
 - On-chain audit
-- Wallet authentication and the Dropbox browser dashboard
 - New storage backends (S3/IPFS)
 - Agent registry/marketplace
 - Agent write workflows
@@ -316,7 +314,6 @@ examples/
   calendar-agent/
   stock-analyst/
   mcp-client/
-  browser-dashboard/  (preview)
 specs/
   draft-00.md
 ```
@@ -401,7 +398,7 @@ UOMP 就是让这句话可执行的那一层。
 4. Agent 通过 Memory Guard 读取，每次访问都有日志。
 5. 你撤销，下一个请求直接 `403`。
 
-Markdown/Obsidian 导入和 CLI 授权闭环现在已经跑通。stdio MCP server 已经可以早期试用；接下来是用 Claude Desktop / Cursor 验证，以及浏览器授权界面。
+Markdown/Obsidian 导入和 CLI 授权闭环现在已经跑通。stdio MCP server 已经可以早期试用；接下来是用 Claude Desktop / Cursor 验证，以及打包 CLI。
 
 ### 工作方式
 
@@ -449,10 +446,9 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 
 1. **MCP 完善**：先用 Claude Desktop / Cursor 验证，再补 resources、prompts 和客户端配置助手。
 2. **打包发布 CLI**：npm 或独立二进制，用户不需要本地构建。
-3. **授权界面**：浏览器里完成授权/撤销、范围预览、审计时间线，不再只靠 CLI。
-4. **更多本地连接器**：在 Obsidian/Markdown 之外继续扩展。
-5. **Python SDK**：去 Agent 开发者最多的地方。
-6. **设计伙伴计划**：10 个有真实每周工作流的用户。
+3. **更多本地连接器**：在 Obsidian/Markdown 之外继续扩展。
+4. **Python SDK**：去 Agent 开发者最多的地方。
+5. **设计伙伴计划**：10 个有真实每周工作流的用户。
 
 ### 第一个里程碑怎么衡量
 
@@ -470,7 +466,6 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 
 - FHE（全同态加密）
 - 链上审计
-- 钱包登录和 Dropbox 浏览器 Dashboard
 - 新的存储后端（S3/IPFS）
 - Agent Registry / 市场
 - Agent 写入流程
@@ -634,7 +629,6 @@ examples/
   calendar-agent/
   stock-analyst/
   mcp-client/
-  browser-dashboard/  （预览）
 specs/
   draft-00.md
 ```

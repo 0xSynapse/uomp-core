@@ -11,7 +11,7 @@ For current usage, start with the [README Quick start](../README.md#quick-start)
 | Quick start / CLI / MCP | [`../README.md`](../README.md) | [`../README.md`](../README.md) |
 | Protocol draft Draft-00 | [`../specs/draft-00.md`](../specs/draft-00.md) | [`../specs/draft-00.en.md`](../specs/draft-00.en.md) |
 | CLI/SDK Design (historical, with current CLI summary) | [`cli-sdk-design.md`](./cli-sdk-design.md) | [`cli-sdk-design.en.md`](./cli-sdk-design.en.md) |
-| SDK Design (API & Architecture) | [`sdk-design.md`](./sdk-design.md) | [`sdk-design.en.md`](./sdk-design.en.md) |
+| SDK Design (API & Architecture, Node.js focus) | [`sdk-design.md`](./sdk-design.md) | [`sdk-design.en.md`](./sdk-design.en.md) |
 
 ## Advanced / preview / research docs
 
@@ -21,7 +21,6 @@ These documents are useful context, but they are not the current core workflow:
 |----------|------|---------|--------|
 | Remote Authorization Design | [`remote-authorization-design.md`](./remote-authorization-design.md) | [`remote-authorization-design.en.md`](./remote-authorization-design.en.md) | Preview |
 | Deployment Guide | [`deployment-guide.md`](./deployment-guide.md) | — | Advanced / preview |
-| Browser SDK Design | [`browser-sdk-design.md`](./browser-sdk-design.md) | — | Preview |
 | Store Abstraction Design | [`store-abstraction-design.md`](./store-abstraction-design.md) | — | Research |
 | On-chain Audit Design | [`on-chain-audit-design.md`](./on-chain-audit-design.md) | — | Research |
 

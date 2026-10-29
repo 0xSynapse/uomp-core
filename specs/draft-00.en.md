@@ -11,8 +11,8 @@
 | Date | Change |
 |------|--------|
 | 2026-07-12 | Draft-00 initial release. |
-| 2026-07-23 | Added Browser Profile (§5.3), Cloud Relay (§15.7), Store abstraction (§0), Payload API (§15.6). Updated `uom.json` schema (§6.2-6.4) with `fields`, `purposes`, `external_data_sources`, `package`. Updated Architecture diagram to include Gateway, Relay, and Browser path. Added FHE to Future Work (§22). Marked on-chain audit as Phase 4. |
-| 2026-10-29 | Local-first reference implementation: CLI + stdio MCP path, 0600 session env delivery, Auth + Guard combined service. Reworked §5 architecture and diagrams; Browser and Remote profiles are explicitly optional/preview. |
+| 2026-07-23 | Added Cloud Relay (§15.7), Store abstraction (§0), Payload API (§15.6). Updated `uom.json` schema (§6.2-6.4) with `fields`, `purposes`, `external_data_sources`, `package`. Updated the architecture diagram to include Gateway and Relay. Added FHE to Future Work (§22). Marked on-chain audit as Phase 4. |
+| 2026-10-29 | Local-first reference implementation: CLI + stdio MCP path, 0600 session env delivery, Auth + Guard combined service. Reworked §5 architecture and diagrams; Remote remains optional/preview. |
 
 ---
 
@@ -24,7 +24,7 @@ The User-Owned Memory Protocol (UOMP) defines a user-sovereign authorization pro
 
 This document is the UOMP protocol draft (Draft-00). It describes the protocol design intent, data formats, HTTP API, and security requirements. It is intended to evolve into a formal standard through public discussion. The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in [RFC 2119](https://datatracker.ietf.org/doc/html/rfc2119).
 
-> **Reference implementation status (2026-10):** the current `uomp` CLI implements the Local Profile first: `import`, `authorize` (writes a `0600` session env file), `serve`, `mcp`, `sessions`, `audit`, and `revoke`. The stdio MCP bridge is experimental. Browser Profile, Remote Profile, and Cloud Relay are optional/preview capabilities and are not required for conformance.
+> **Reference implementation status (2026-10):** the current `uomp` CLI implements the Local Profile first: `import`, `authorize` (writes a `0600` session env file), `serve`, `mcp`, `sessions`, `audit`, and `revoke`. The stdio MCP bridge is experimental. Remote Profile and Cloud Relay are optional/preview capabilities and are not required for conformance.
 
 ## 3. Introduction
 
@@ -68,7 +68,6 @@ UOMP's design goals are:
 | **uom.json** | Agent manifest file describing the Agent's identity and default requested memory scope. |
 | **Local Profile** | Local deployment model where Memory Guard listens on `127.0.0.1`; default and current implementation. |
 | **Remote Profile** | Remote deployment model where an Agent reaches Guard through Gateway; optional/advanced. |
-| **Browser Profile** | Browser/wallet deployment model; preview/non-core. |
 
 ## 5. Protocol Overview
 
@@ -77,7 +76,6 @@ UOMP's design goals are:
 <img src="https://www.uomp.org/diagrams/spec-architecture-local-en.svg" alt="Local path: CLI authorize → 0600 env file → Agent/MCP client → Auth + Guard → Store/Audit" class="diagram" />
 <img src="https://www.uomp.org/diagrams/spec-architecture-mcp-en.svg" alt="MCP path: MCP client → stdio bridge → Auth + Guard → Store/Audit" class="diagram" />
 <img src="https://www.uomp.org/diagrams/spec-architecture-remote-en.svg" alt="Remote path (optional): Remote Agent → Gateway → Guard → Store" class="diagram" />
-<img src="https://www.uomp.org/diagrams/spec-architecture-browser-en.svg" alt="Browser path (preview): Wallet → Gateway/Guard → Store" class="diagram" />
 
 UOMP's complete architecture includes the following components:
 
@@ -88,19 +86,17 @@ UOMP's complete architecture includes the following components:
 | **Memory Guard** | User's machine | Token validation, scope filtering, aggregate queries, audit logging. |
 | **CLI** | User's machine | User interaction: import, authorize, sessions, audit, revoke. |
 | **MCP bridge** | User's machine (optional) | stdio MCP adapter (`uomp mcp`): Claude Desktop / Cursor / OpenCode → HTTP Guard. Experimental. |
-| **Browser UI** | Browser (preview) | Wallet auth + encrypted storage; not on the current core path. |
 | **Gateway** | User's machine (optional) | mTLS tunnel + token forwarding, exposing Guard to remote Agents. Supports Cloudflare Tunnel. |
 | **Cloud Relay** | Public network (design/preview) | Stateless public relay that validates Tokens with only the Guard public key and forwards requests. |
 | **Agent** | Anywhere | Independent process carrying a Capability Token to read data via Guard or Gateway. |
 
-Four access paths:
+Three access paths:
 
 1. **Local (default)**: the CLI authorizes and writes the token to a `0600` session env file; the Agent accesses Guard directly at `127.0.0.1:9374`.
 2. **MCP (local adapter, experimental)**: the MCP client starts `uomp mcp` over stdio; the bridge reads the same session env file and calls Guard over HTTP + Token. The MCP bridge does not add a new trust boundary.
 3. **Remote (optional/advanced)**: the Agent accesses Guard through Gateway (mTLS + Tunnel).
-4. **Browser (preview)**: the user connects a wallet (MetaMask/Argent X) through the browser Dashboard, stores encrypted data in Dropbox, and calls Guard and Agents through Gateway; not on the current core path.
 
-The Local Profile and its MCP adapter are the current reference implementation path. Remote and Browser profiles are optional extensions and are not required for all implementations.
+The Local Profile and its MCP adapter are the current reference implementation path. Remote Profile is an optional extension and is not required for all implementations.
 
 ### 5.2 Flow
 
@@ -118,15 +114,14 @@ The MCP bridge follows the same steps 4-6, replacing the Agent-side transport wi
 
 ### 5.3 Profiles
 
-UOMP defines three deployment profiles:
+UOMP defines two deployment profiles:
 
 | Profile | Default Port | Transport | Authentication | Storage | Status |
 |---------|--------------|-----------|----------------|---------|--------|
 | Local Profile | `127.0.0.1:9374` | HTTP | Capability Token | SQLite (local) | Default / current implementation |
 | Remote Profile | User-configured | HTTPS | Capability Token + mTLS | User-specified | Optional / advanced |
-| Browser Profile | Gateway URL | HTTPS + CORS | Wallet signature (preview) + Capability Token | Dropbox (encrypted objects) | Preview / non-core |
 
-Local Profile is the default and RECOMMENDED configuration, and the reference implementation's primary path. Remote Profile MUST be explicitly enabled. Browser Profile is designed for zero-install scenarios: wallet signature derives an encryption key (PBKDF2), data is stored as ciphertext in Dropbox, server-side zero-knowledge. It is currently a preview, not a conformance requirement.
+Local Profile is the default and RECOMMENDED configuration, and the reference implementation's primary path. Remote Profile MUST be explicitly enabled.
 
 The MCP bridge is not a separate profile; it is an optional stdio adapter over the Local Profile.
 
@@ -1025,7 +1020,7 @@ Cloud Relay is a stateless public relay service allowing Agents to access Guard 
 | Authentication | mTLS (mutual TLS) | Public-key signature verification (Ed25519) |
 | Configuration | Required (TLS certs) | None (zero-config) |
 | Tunnel | Cloudflare Tunnel | Independent user tunnel or other |
-| Use case | User-controlled environments | Non-technical users, browser-based |
+| Use case | User-controlled environments | Non-technical users, public relay |
 
 **Workflow**:
 
@@ -1209,7 +1204,7 @@ Verification path:
 
 #### 18.4.3 Paymaster
 
-Starknet natively supports paymasters (sponsored gas). Agents or relays can sponsor transactions so users never pay for individual Access events. The user's wallet only signs once for authorization.
+Starknet natively supports paymasters (sponsored gas). Agents or relays can sponsor transactions so users never pay for individual Access events. The user only signs once for authorization.
 
 #### 18.4.4 FHE Extension (Future)
 

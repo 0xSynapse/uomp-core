@@ -1,8 +1,7 @@
 # UOMP SDK 设计文档
 
-> 状态：Phase 1-3 ✅ 全部完成 | Browser export ✅ | Wallet auth ✅ | Memory write ✅
-> 实现进度：✅ UompClient 全子客户端 ✅ Token 解码 ✅ Auth 子客户端 ✅ 浏览器入口 ✅ StoreRouter ✅ 钱包签名 (HKDF)
-> Demo：https://www.uomp.org/dashboard/
+> 状态：当前以 Node.js `UompClient` 为主。Browser export、Wallet auth、StoreRouter 和写入流程已暂缓，不在当前路线图上。
+> 实现进度：`UompClient` 读取、聚合、审计等 Node.js 路径可用；浏览器/钱包部分保留为历史设计。
 
 ---
 
