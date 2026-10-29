@@ -115,6 +115,7 @@ Design principles:
 | Local memory store | SQLite; CSV/JSON and Obsidian/Markdown import |
 | Local knowledge import | Markdown folders; frontmatter tags; path-derived scopes; `--dry-run` |
 | One-command install | `install.sh` source build (Node 22 + git) |
+| Demo & diagnostics | `uomp demo` (isolated) and `uomp doctor` |
 | Agent manifest | `uom.json` with requested scopes |
 | Authorization | CLI, with tag/key/field scopes and deny lists |
 | MCP | stdio server with `list_memory`, `search_memory`, and `read_memory` (experimental) |
@@ -171,6 +172,22 @@ uomp init
 The installer clones UOMP into `~/.uomp/cli`, builds the CLI, and links `uomp` into `~/.local/bin`. If that directory is not on your `PATH`, the script prints the line to add.
 
 From a source checkout, run `pnpm install && pnpm build`, then use `pnpm cli ...` instead of `uomp ...`.
+
+**See the loop first**
+
+```bash
+uomp demo
+```
+
+This runs import → authorize → allowed read → denied read → audit → revoke against a temporary data directory. It does not touch your real `~/.uomp`.
+
+If something is not working, run:
+
+```bash
+uomp doctor
+```
+
+It checks Node, git, data-directory permissions, keys, databases, session env files, and the local server port.
 
 **Import an Obsidian / Markdown vault**
 
@@ -430,6 +447,7 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 | 本地记忆存储 | SQLite，支持 CSV/JSON 和 Obsidian/Markdown 导入 |
 | 本地知识导入 | Markdown 目录、frontmatter tags、按路径生成范围、`--dry-run` |
 | 一条命令安装 | `install.sh` 源码构建（Node 22 + git） |
+| Demo 与诊断 | `uomp demo`（隔离数据）和 `uomp doctor` |
 | Agent 声明 | `uom.json`，声明请求范围 |
 | 授权 | CLI，支持 tag/key/field 范围和 deny 列表 |
 | MCP | stdio server，提供 `list_memory`、`search_memory` 和 `read_memory`（实验） |
@@ -486,6 +504,22 @@ uomp init
 安装脚本会把 UOMP 克隆到 `~/.uomp/cli`，构建 CLI，并把 `uomp` 链接到 `~/.local/bin`。如果这个目录不在 `PATH` 里，脚本会打印需要添加的那一行。
 
 从源码运行时，执行 `pnpm install && pnpm build`，然后用 `pnpm cli ...` 代替 `uomp ...`。
+
+**先看完整闭环**
+
+```bash
+uomp demo
+```
+
+它会在临时数据目录里跑完：导入 → 授权 → 允许读取 → 拒绝读取 → 审计 → 撤销。不会碰你真实的 `~/.uomp`。
+
+如果哪里不对，运行：
+
+```bash
+uomp doctor
+```
+
+它会检查 Node、git、数据目录权限、密钥、数据库、会话 env 文件和本地 server 端口。
 
 **导入 Obsidian / Markdown 笔记库**
 

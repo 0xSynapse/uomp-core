@@ -1,4 +1,4 @@
-import { mkdir } from 'fs/promises';
+import { chmod, mkdir } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
 import {
@@ -27,8 +27,8 @@ export class UompConfig {
   readonly host: string;
   adminToken!: string;
 
-  constructor(options: { port?: number; host?: string } = {}) {
-    this.dataDir = join(homedir(), DATA_DIR_NAME);
+  constructor(options: { dataDir?: string; port?: number; host?: string } = {}) {
+    this.dataDir = options.dataDir ?? join(homedir(), DATA_DIR_NAME);
     this.agentsDir = join(this.dataDir, AGENTS_DIR_NAME);
     this.registryDir = join(this.dataDir, 'registry');
     this.secretsDir = join(this.dataDir, SECRETS_DIR_NAME);
@@ -41,11 +41,14 @@ export class UompConfig {
   }
 
   async init(): Promise<void> {
-    await mkdir(this.dataDir, { recursive: true });
-    await mkdir(this.agentsDir, { recursive: true });
-    await mkdir(this.registryDir, { recursive: true });
-    await mkdir(this.secretsDir, { recursive: true });
+    await mkdir(this.dataDir, { recursive: true, mode: 0o700 });
+    await mkdir(this.agentsDir, { recursive: true, mode: 0o700 });
+    await mkdir(this.registryDir, { recursive: true, mode: 0o700 });
+    await mkdir(this.secretsDir, { recursive: true, mode: 0o700 });
     await mkdir(this.sessionsDir, { recursive: true, mode: 0o700 });
+    await chmod(this.dataDir, 0o700).catch(() => {});
+    await chmod(this.secretsDir, 0o700).catch(() => {});
+    await chmod(this.sessionsDir, 0o700).catch(() => {});
     this.adminToken = loadOrCreateAdminToken(this.secretsDir);
   }
 
