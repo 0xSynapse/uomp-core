@@ -128,6 +128,30 @@ test('authorize writes a private env file and keeps the token out of stdout', ()
   }
 });
 
+test('authorize creates a generic MCP session without an agent path', () => {
+  const home = mkdtempSync(join(tmpdir(), 'uomp-cli-generic-authorize-'));
+
+  try {
+    const result = runCli(home, [
+      'authorize',
+      '--scope', 'notes/projects',
+      '--no-server',
+    ]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Agent\s+MCP Client \(mcp-client\)/);
+
+    const sessionId = /Session granted: (sess_\S+)/.exec(result.stdout)[1];
+    assert.ok(existsSync(join(home, '.uomp', 'sessions', `${sessionId}.env`)));
+
+    const noScope = runCli(home, ['authorize', '--no-server']);
+    assert.equal(noScope.status, 1);
+    assert.match(noScope.stdout + noScope.stderr, /Pass --scope/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('authorize --output writes the env file to a custom path', () => {
   const home = mkdtempSync(join(tmpdir(), 'uomp-cli-output-'));
   const agent = join(home, 'agent');

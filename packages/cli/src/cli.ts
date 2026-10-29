@@ -77,8 +77,8 @@ program
   });
 
 program
-  .command('authorize <agent>')
-  .description('Authorize an agent and create a session')
+  .command('authorize [agent]')
+  .description('Authorize an agent, or a generic MCP client when no path is given')
   .option('-s, --scope <scopes...>', 'Read tags to grant (skips the interactive prompt)')
   .option('-o, --output <file>', 'Write the session env file to a custom path')
   .option('-d, --duration <minutes>', 'Session duration in minutes (1-1440)', '30')
@@ -86,7 +86,7 @@ program
   .option('--host <host>', 'Local server host (default: 127.0.0.1)')
   .option('--print-token', 'Print the capability token (it is also written to the env file)')
   .option('--no-server', 'Do not start the local Auth + Guard server')
-  .action(async (agent: string, options: {
+  .action(async (agent: string | undefined, options: {
     scope?: string[];
     output?: string;
     duration?: string;

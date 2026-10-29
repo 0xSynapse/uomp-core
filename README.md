@@ -264,7 +264,7 @@ uomp serve
 
 # Terminal 2
 uomp import ~/Obsidian/MyVault
-uomp authorize ./examples/mcp-client \
+uomp authorize \
   --scope notes/projects \
   --output ~/.uomp/mcp-client.env \
   --no-server
@@ -596,7 +596,7 @@ uomp serve
 
 # 终端 2
 uomp import ~/Obsidian/MyVault
-uomp authorize ./examples/mcp-client \
+uomp authorize \
   --scope notes/projects \
   --output ~/.uomp/mcp-client.env \
   --no-server

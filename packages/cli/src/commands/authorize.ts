@@ -8,7 +8,7 @@ import { MemoryStore } from '@uomp/store';
 import { IdentityVerifier } from '@uomp/identity';
 import { loadManifest } from '../utils/manifest.js';
 import type { AgentManifest, ScopeAction, Scopes } from '@uomp/core';
-import { buildReadScope, inferSensitivity } from '@uomp/core';
+import { buildReadScope, inferSensitivity, normalizeManifest } from '@uomp/core';
 import {
   createUompRuntime,
   installShutdownHandlers,
@@ -34,15 +34,24 @@ export class AuthorizeCommands {
     this.config = config;
   }
 
-  async authorize(agentPath: string, options: AuthorizeOptions): Promise<void> {
+  async authorize(agentPath: string | undefined, options: AuthorizeOptions): Promise<void> {
     const durationMinutes = parseDuration(options.duration);
     await this.config.init();
 
-    const resolvedPath = resolve(agentPath);
-    const manifest = await loadManifest(resolvedPath);
+    const resolvedPath = agentPath ? resolve(agentPath) : undefined;
+    let manifest: AgentManifest;
 
-    if (!manifest) {
-      throw new Error(`Could not find uom.json in ${resolvedPath}`);
+    if (resolvedPath) {
+      const loaded = await loadManifest(resolvedPath);
+      if (!loaded) {
+        throw new Error(`Could not find uom.json in ${resolvedPath}`);
+      }
+      manifest = loaded;
+    } else {
+      if (!options.scope || options.scope.length === 0) {
+        throw new Error('Pass --scope when authorizing a generic MCP client, or provide an agent path.');
+      }
+      manifest = genericMcpManifest();
     }
 
     const verification = await new IdentityVerifier().verifyManifest(manifest);
@@ -83,7 +92,7 @@ export class AuthorizeCommands {
 
     const printSummary = () => this.printSummary({
       manifest,
-      agentPath: resolvedPath,
+      ...(resolvedPath ? { agentPath: resolvedPath } : {}),
       sessionId: session.sessionId,
       expiresAt: grant.expiresAt,
       durationMinutes,
@@ -270,7 +279,7 @@ export class AuthorizeCommands {
 
   private printSummary(input: {
     manifest: AgentManifest;
-    agentPath: string;
+    agentPath?: string;
     sessionId: string;
     expiresAt: string;
     durationMinutes: number;
@@ -294,8 +303,8 @@ export class AuthorizeCommands {
     console.log('');
     console.log(chalk.bold('Open a new terminal, then:'));
     console.log(`  source ${shellQuote(envPath)}`);
-    const entryPoint = join(agentPath, 'index.js');
-    if (existsSync(entryPoint)) {
+    const entryPoint = agentPath ? join(agentPath, 'index.js') : null;
+    if (entryPoint && existsSync(entryPoint)) {
       console.log(chalk.gray(`  node ${shellQuote(entryPoint)}   # example`));
     }
 
@@ -315,6 +324,23 @@ function emptyScopes(): Scopes {
     read: { tags: [], keys: [], denyTags: [], denyKeys: [] },
     write: { tags: [], keys: [], denyTags: [], denyKeys: [] },
   };
+}
+
+function genericMcpManifest(): AgentManifest {
+  return normalizeManifest({
+    uomp_version: '1.0',
+    agent: {
+      id: 'mcp-client',
+      name: 'MCP Client',
+      version: '0.1.0',
+      description: 'Generic MCP client',
+      publisher: 'uomp',
+    },
+    requested_scopes: {
+      read: { tags: [], keys: [], deny_tags: [], deny_keys: [] },
+      write: { tags: [], keys: [], deny_tags: [], deny_keys: [] },
+    },
+  });
 }
 
 function parseDuration(value?: string): number {
