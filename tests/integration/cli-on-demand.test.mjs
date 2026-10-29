@@ -37,6 +37,7 @@ function startMcp(home, envPath, port) {
     '--client', 'claude',
     '--request-scope', 'notes/projects',
     '--base-url', `http://127.0.0.1:${port}`,
+    '--no-open',
   ], {
     env: { ...process.env, HOME: home, NO_COLOR: '1' },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -82,6 +83,15 @@ function startMcp(home, envPath, port) {
       child.kill('SIGTERM');
     },
   };
+}
+
+async function waitFor(check, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (check()) return;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error('timed out waiting for condition');
 }
 
 test('on-demand consent creates a request and works after approval', async t => {
@@ -133,15 +143,16 @@ test('on-demand consent creates a request and works after approval', async t => 
   });
   assert.equal(init.result.serverInfo.name, 'uomp');
 
-  const first = await mcp.request('tools/call', {
+  const firstCall = mcp.request('tools/call', {
     name: 'list_memory',
     arguments: { tag: 'notes/projects' },
   });
-  const firstText = first.result.content[0].text;
-  assert.equal(first.result.isError, true);
-  assert.match(firstText, /uomp approve consent_/);
 
-  const requestId = /uomp approve (consent_[A-Za-z0-9_]+)/.exec(firstText)[1];
+  await waitFor(() => /UOMP approval required: http/.test(mcp.stderr()));
+  const approvalUrl = /UOMP approval required: (\S+)/.exec(mcp.stderr())[1];
+  const requestId = new URL(approvalUrl).pathname.split('/').pop();
+  assert.ok(requestId);
+
   const pending = JSON.parse(runCli(home, ['pending', '--json']).stdout);
   assert.equal(pending.length, 1);
   assert.equal(pending[0].requestId, requestId);
@@ -151,12 +162,9 @@ test('on-demand consent creates a request and works after approval', async t => 
   assert.ok(existsSync(envPath));
   assert.deepEqual(JSON.parse(runCli(home, ['pending', '--json']).stdout), []);
 
-  const second = await mcp.request('tools/call', {
-    name: 'list_memory',
-    arguments: { tag: 'notes/projects' },
-  });
-  assert.equal(second.result.isError, false);
-  assert.match(second.result.content[0].text, /note\.projects\.plan/);
+  const first = await firstCall;
+  assert.equal(first.result.isError, false);
+  assert.match(first.result.content[0].text, /note\.projects\.plan/);
 
   await mcp.close();
 });
@@ -195,24 +203,107 @@ test('denying an on-demand request lets the next call create a new request', asy
     clientInfo: { name: 'on-demand-test', version: '0.0.0' },
   });
 
-  const first = await mcp.request('tools/call', {
+  const firstCall = mcp.request('tools/call', {
     name: 'list_memory',
     arguments: { tag: 'notes/projects' },
   });
-  const firstId = /uomp approve (consent_[A-Za-z0-9_]+)/.exec(first.result.content[0].text)?.[1];
+
+  await waitFor(() => /UOMP approval required: http/.test(mcp.stderr()));
+  const firstUrl = /UOMP approval required: (\S+)/.exec(mcp.stderr())[1];
+  const firstId = new URL(firstUrl).pathname.split('/').pop();
   assert.ok(firstId);
 
   const denied = runCli(home, ['deny', firstId]);
   assert.equal(denied.status, 0, denied.stderr);
   assert.deepEqual(JSON.parse(runCli(home, ['pending', '--json']).stdout), []);
 
-  const second = await mcp.request('tools/call', {
+  const first = await firstCall;
+  assert.equal(first.result.isError, true);
+
+  const stderrBefore = mcp.stderr().length;
+  const secondCall = mcp.request('tools/call', {
     name: 'list_memory',
     arguments: { tag: 'notes/projects' },
   });
-  const secondId = /uomp approve (consent_[A-Za-z0-9_]+)/.exec(second.result.content[0].text)?.[1];
+
+  await waitFor(() => /UOMP approval required: http/.test(mcp.stderr().slice(stderrBefore)));
+  const secondUrl = /UOMP approval required: (\S+)/.exec(mcp.stderr().slice(stderrBefore))[1];
+  const secondId = new URL(secondUrl).pathname.split('/').pop();
   assert.ok(secondId);
   assert.notEqual(secondId, firstId);
+
+  const approved = runCli(home, ['approve', secondId]);
+  assert.equal(approved.status, 0, approved.stderr);
+
+  const second = await secondCall;
+  assert.equal(second.result.isError, false);
+  assert.match(second.result.content[0].text, /note\.projects\.plan/);
+
+  await mcp.close();
+});
+
+test('approving in the local consent page lets the original tool call continue', async t => {
+  const home = mkdtempSync(join(tmpdir(), 'uomp-on-demand-page-'));
+  const vault = join(home, 'vault');
+  const configPath = join(home, 'claude.json');
+  const envPath = join(home, '.uomp', 'sessions', 'claude.env');
+  const port = await getFreePort();
+
+  mkdirSync(join(vault, 'projects'), { recursive: true });
+  writeFileSync(join(vault, 'projects', 'plan.md'), '# Plan\nShip it.\n');
+
+  t.after(async () => {
+    runCli(home, ['stop']);
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  const connected = runCli(home, [
+    'connect', 'claude',
+    '--vault', vault,
+    '--scope', 'notes/projects',
+    '--on-demand',
+    '--port', String(port),
+    '--config', configPath,
+  ]);
+  assert.equal(connected.status, 0, connected.stderr);
+
+  const mcp = startMcp(home, envPath, port);
+  t.after(() => mcp.kill());
+
+  await mcp.request('initialize', {
+    protocolVersion: '2025-06-18',
+    capabilities: {},
+    clientInfo: { name: 'on-demand-test', version: '0.0.0' },
+  });
+
+  const call = mcp.request('tools/call', {
+    name: 'list_memory',
+    arguments: { tag: 'notes/projects' },
+  });
+
+  await waitFor(() => /UOMP approval required: http/.test(mcp.stderr()));
+  const approvalUrl = /UOMP approval required: (\S+)/.exec(mcp.stderr())[1];
+  const parsed = new URL(approvalUrl);
+  const requestId = parsed.pathname.split('/').pop();
+  const secret = parsed.searchParams.get('secret');
+  assert.ok(requestId);
+  assert.ok(secret);
+
+  const approved = await fetch(`${parsed.origin}/consent/${requestId}`, {
+    method: 'POST',
+    body: new URLSearchParams({
+      secret,
+      action: 'approve',
+      tag: 'notes/projects',
+    }),
+  });
+  assert.equal(approved.status, 200);
+  assert.match(await approved.text(), /Access approved/);
+
+  const result = await call;
+  assert.equal(result.result.isError, false);
+  assert.match(result.result.content[0].text, /note\.projects\.plan/);
+  assert.ok(existsSync(envPath));
 
   await mcp.close();
 });

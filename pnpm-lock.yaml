@@ -79,6 +79,9 @@ importers:
       '@uomp/guard':
         specifier: workspace:*
         version: link:../../packages/guard
+      '@uomp/store':
+        specifier: workspace:*
+        version: link:../../packages/store
       '@uomp/token':
         specifier: workspace:*
         version: link:../../packages/token

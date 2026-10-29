@@ -1,8 +1,9 @@
 import Database from 'better-sqlite3';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
-import { timingSafeEqual } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import type { Scopes } from '@uomp/core';
+import { inferSensitivity } from '@uomp/core';
 import { generateId } from '@uomp/core';
 import { JWTTokenIssuer, type CapabilityTokenPayload } from '@uomp/token';
 
@@ -26,6 +27,13 @@ export interface AuthServiceOptions {
   issuer: JWTTokenIssuer;
   defaultDurationMinutes?: number;
   adminToken: string;
+  consentKeyResolver?: (tag: string) => ConsentKeyInfo[];
+}
+
+export interface ConsentKeyInfo {
+  key: string;
+  title?: string;
+  sensitivity: 'low' | 'medium' | 'high';
 }
 
 export type ConsentRequestStatus = 'pending' | 'approved' | 'denied' | 'expired';
@@ -193,11 +201,45 @@ export function validateConsentGrant(requested: Scopes, granted: Scopes): string
   return errors.length > 0 ? errors.join('; ') : null;
 }
 
+function hashSecret(secret: string): string {
+  return createHash('sha256').update(secret).digest('hex');
+}
+
+function toArray(value: string | File | (string | File)[] | undefined): string[] {
+  if (value === undefined) return [];
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string');
+  }
+  return typeof value === 'string' ? [value] : [];
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderMessagePage(title: string, message: string): string {
+  return `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${escapeHtml(title)}</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;max-width:560px;margin:64px auto;padding:0 20px;color:#111827}h1{font-size:1.3rem}p{color:#4b5563}</style>
+</head>
+<body><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p></body>
+</html>`;
+}
+
 export class AuthService {
   private db: Database.Database;
   private issuer: JWTTokenIssuer;
   private defaultDurationMinutes: number;
   private adminToken: string;
+  private consentKeyResolver?: (tag: string) => ConsentKeyInfo[];
+  private consentTokens = new Map<string, { token: string; expiresAt: string; sessionId: string }>();
   private app: Hono;
 
   constructor(options: AuthServiceOptions) {
@@ -205,6 +247,7 @@ export class AuthService {
     this.issuer = options.issuer;
     this.defaultDurationMinutes = options.defaultDurationMinutes ?? 30;
     this.adminToken = options.adminToken;
+    this.consentKeyResolver = options.consentKeyResolver;
     this.initSchema();
     this.app = this.createApp();
   }
@@ -239,6 +282,7 @@ export class AuthService {
         requested_scopes TEXT NOT NULL,
         env_path TEXT,
         base_url TEXT,
+        secret_hash TEXT,
         status TEXT NOT NULL,
         created_at TEXT NOT NULL,
         expires_at TEXT NOT NULL,
@@ -246,6 +290,14 @@ export class AuthService {
         granted_scopes TEXT
       );
     `);
+
+    const consentColumns = this.db.prepare('PRAGMA table_info(consent_requests)').all() as { name: string }[];
+    if (!consentColumns.some(column => column.name === 'base_url')) {
+      this.db.exec('ALTER TABLE consent_requests ADD COLUMN base_url TEXT');
+    }
+    if (!consentColumns.some(column => column.name === 'secret_hash')) {
+      this.db.exec('ALTER TABLE consent_requests ADD COLUMN secret_hash TEXT');
+    }
   }
 
   getApp(): Hono {
@@ -412,7 +464,8 @@ export class AuthService {
         return c.json({ error: { code: 'INVALID_REQUEST', message: parsed.error.message } }, 400);
       }
 
-      const request = this.createConsentRequest(parsed.data);
+      const { request, secret } = this.createConsentRequest(parsed.data);
+      const origin = new URL(c.req.url).origin;
       return c.json({
         request_id: request.requestId,
         session_id: request.sessionId,
@@ -421,6 +474,7 @@ export class AuthService {
         agent_id: request.agentId,
         requested_scopes: request.requestedScopes,
         expires_at: request.expiresAt,
+        approval_url: `${origin}/consent/${request.requestId}?secret=${secret}`,
       });
     });
 
@@ -433,14 +487,33 @@ export class AuthService {
     });
 
     app.get('/v1/consent/requests/:id', c => {
-      const unauthorized = this.requireAdmin(c);
-      if (unauthorized) return unauthorized;
+      const secret = c.req.query('secret');
+      if (secret) {
+        if (!this.verifyConsentSecret(c.req.param('id'), secret)) {
+          return c.json({ error: { code: 'FORBIDDEN', message: 'Invalid consent secret' } }, 403);
+        }
+      } else {
+        const unauthorized = this.requireAdmin(c);
+        if (unauthorized) return unauthorized;
+      }
 
       const request = this.getConsentRequest(c.req.param('id'));
       if (!request) {
         return c.json({ error: { code: 'REQUEST_NOT_FOUND', message: 'Consent request not found' } }, 404);
       }
-      return c.json(request);
+
+      const token = secret ? this.consentTokens.get(request.requestId) : undefined;
+      return c.json({
+        ...request,
+        session_id: request.sessionId,
+        agent_id: request.agentId,
+        ...(token
+          ? {
+              token: token.token,
+              token_expires_at: token.expiresAt,
+            }
+          : {}),
+      });
     });
 
     app.post('/v1/consent/requests/:id/approve', async c => {
@@ -485,6 +558,106 @@ export class AuthService {
       return c.json({ request_id: request.requestId, status: request.status });
     });
 
+    app.get('/consent/:id', c => {
+      const requestId = c.req.param('id');
+      const secret = c.req.query('secret');
+      if (!secret || !this.verifyConsentSecret(requestId, secret)) {
+        return c.html(renderMessagePage('Invalid request', 'This consent link is invalid or has expired.'), 403);
+      }
+
+      const request = this.getConsentRequest(requestId);
+      if (!request) {
+        return c.html(renderMessagePage('Request not found', 'This consent request no longer exists.'), 404);
+      }
+      if (request.status !== 'pending') {
+        return c.html(renderMessagePage(
+          'Request already handled',
+          `This request is ${request.status}.`
+        ));
+      }
+
+      return c.html(this.renderConsentPage(request, secret));
+    });
+
+    app.post('/consent/:id', async c => {
+      const requestId = c.req.param('id');
+      const body = await c.req.parseBody();
+      const secret = typeof body.secret === 'string' ? body.secret : '';
+      if (!secret || !this.verifyConsentSecret(requestId, secret)) {
+        return c.html(renderMessagePage('Invalid request', 'This consent link is invalid or has expired.'), 403);
+      }
+
+      const request = this.getConsentRequest(requestId);
+      if (!request) {
+        return c.html(renderMessagePage('Request not found', 'This consent request no longer exists.'), 404);
+      }
+      if (request.status !== 'pending') {
+        return c.html(renderMessagePage('Request already handled', `This request is ${request.status}.`));
+      }
+
+      const action = typeof body.action === 'string' ? body.action : '';
+      if (action === 'deny') {
+        this.denyConsentRequest(requestId);
+        return c.html(renderMessagePage('Access denied', 'The agent will not receive a token.'));
+      }
+      if (action !== 'approve') {
+        return c.html(renderMessagePage('Invalid action', 'Choose approve or deny.'), 400);
+      }
+
+      const tags = toArray(body.tag).filter(tag => request.requestedScopes.read.tags.includes(tag));
+      const requestedKeys = toArray(body.key);
+      const allowedKeys = new Set<string>();
+
+      for (const tag of tags) {
+        const keys = this.consentKeyResolver?.(tag) ?? [];
+        for (const key of keys) {
+          if (requestedKeys.includes(key.key)) {
+            allowedKeys.add(key.key);
+          }
+        }
+      }
+
+      for (const key of request.requestedScopes.read.keys) {
+        if (tags.some(tag => (this.consentKeyResolver?.(tag) ?? []).some(item => item.key === key))) {
+          allowedKeys.add(key);
+        }
+      }
+
+      const grantedScopes: Scopes = {
+        read: {
+          tags,
+          keys: [...allowedKeys],
+          denyTags: request.requestedScopes.read.denyTags,
+          denyKeys: request.requestedScopes.read.denyKeys,
+          ...(request.requestedScopes.read.allowedFields
+            ? { allowedFields: request.requestedScopes.read.allowedFields }
+            : {}),
+        },
+        write: {
+          tags: [],
+          keys: [],
+          denyTags: request.requestedScopes.write.denyTags,
+          denyKeys: request.requestedScopes.write.denyKeys,
+        },
+      };
+
+      try {
+        const result = await this.approveConsentRequest(requestId, grantedScopes);
+        if (!result) {
+          return c.html(renderMessagePage('Approval failed', 'The request is no longer pending.'), 409);
+        }
+        return c.html(renderMessagePage(
+          'Access approved',
+          'The agent will receive a short-lived token. You can close this window.'
+        ));
+      } catch (error) {
+        return c.html(renderMessagePage(
+          'Approval failed',
+          error instanceof Error ? error.message : String(error)
+        ), 400);
+      }
+    });
+
     return app;
   }
 
@@ -522,7 +695,7 @@ export class AuthService {
     return session;
   }
 
-  createConsentRequest(data: CreateConsentRequestInput): ConsentRequest {
+  createConsentRequest(data: CreateConsentRequestInput): { request: ConsentRequest; secret: string } {
     const session = this.createSession({
       agent_id: data.agent_id,
       ...(data.agent_name ? { agent_name: data.agent_name } : {}),
@@ -532,12 +705,14 @@ export class AuthService {
 
     const requestId = generateId('consent');
     const createdAt = new Date().toISOString();
+    const secret = randomBytes(24).toString('hex');
+    const secretHash = hashSecret(secret);
 
     this.db.prepare(`
       INSERT INTO consent_requests (
         request_id, session_id, client, agent_id, agent_name, requested_scopes,
-        env_path, base_url, status, created_at, expires_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        env_path, base_url, secret_hash, status, created_at, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
     `).run(
       requestId,
       session.sessionId,
@@ -547,22 +722,26 @@ export class AuthService {
       JSON.stringify(data.requested_scopes),
       data.env_path ?? null,
       data.base_url ?? null,
+      secretHash,
       createdAt,
       session.expiresAt
     );
 
     return {
-      requestId,
-      sessionId: session.sessionId,
-      ...(data.client ? { client: data.client } : {}),
-      agentId: data.agent_id,
-      ...(data.agent_name ? { agentName: data.agent_name } : {}),
-      requestedScopes: data.requested_scopes,
-      ...(data.env_path ? { envPath: data.env_path } : {}),
-      ...(data.base_url ? { baseUrl: data.base_url } : {}),
-      status: 'pending',
-      createdAt,
-      expiresAt: session.expiresAt,
+      request: {
+        requestId,
+        sessionId: session.sessionId,
+        ...(data.client ? { client: data.client } : {}),
+        agentId: data.agent_id,
+        ...(data.agent_name ? { agentName: data.agent_name } : {}),
+        requestedScopes: data.requested_scopes,
+        ...(data.env_path ? { envPath: data.env_path } : {}),
+        ...(data.base_url ? { baseUrl: data.base_url } : {}),
+        status: 'pending',
+        createdAt,
+        expiresAt: session.expiresAt,
+      },
+      secret,
     };
   }
 
@@ -580,6 +759,88 @@ export class AuthService {
 
     return this.deserializeConsentRequest(row);
   }
+
+  verifyConsentSecret(requestId: string, secret: string): boolean {
+    const row = this.db.prepare('SELECT secret_hash FROM consent_requests WHERE request_id = ?')
+      .get(requestId) as { secret_hash?: string } | undefined;
+    if (!row?.secret_hash) return false;
+
+    const expected = Buffer.from(row.secret_hash);
+    const actual = Buffer.from(hashSecret(secret));
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  }
+
+  private renderConsentPage(request: ConsentRequest, secret: string): string {
+    const tags = request.requestedScopes.read.tags;
+    const rows = tags.map(tag => {
+      const keys = this.consentKeyResolver?.(tag) ?? [];
+      const sensitivity = keys.some(key => key.sensitivity === 'high') || inferSensitivity(tag) === 'high'
+        ? 'high'
+        : keys.some(key => key.sensitivity === 'medium') || inferSensitivity(tag) === 'medium'
+          ? 'medium'
+          : 'low';
+      const checked = sensitivity === 'high' ? '' : ' checked';
+      const keyRows = sensitivity === 'high'
+        ? keys.map(key => `
+            <label class="key">
+              <input type="checkbox" name="key" value="${escapeHtml(key.key)}">
+              <span>${escapeHtml(key.key)}${key.title ? ` — ${escapeHtml(key.title)}` : ''}</span>
+            </label>`).join('')
+        : '';
+
+      return `
+        <section class="scope">
+          <label class="tag">
+            <input type="checkbox" name="tag" value="${escapeHtml(tag)}"${checked}>
+            <span>${escapeHtml(tag)}</span>
+            <em class="${sensitivity}">${sensitivity}</em>
+          </label>
+          ${keyRows ? `<div class="keys">${keyRows}</div>` : ''}
+        </section>`;
+    }).join('');
+
+    const title = escapeHtml(request.agentName ?? request.agentId);
+    return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UOMP consent</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 680px; margin: 48px auto; padding: 0 20px; }
+  h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+  .muted { color: #6b7280; }
+  .scope { border: 1px solid #d1d5db; border-radius: 10px; padding: 12px 14px; margin: 12px 0; }
+  .tag { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+  .tag em { margin-left: auto; font-style: normal; font-size: .75rem; padding: 2px 8px; border-radius: 999px; }
+  .tag em.low { background: #dcfce7; color: #166534; }
+  .tag em.medium { background: #fef3c7; color: #92400e; }
+  .tag em.high { background: #fee2e2; color: #991b1b; }
+  .keys { margin: 10px 0 0 24px; display: grid; gap: 6px; }
+  .key { display: flex; gap: 8px; font-size: .9rem; color: #4b5563; }
+  .actions { display: flex; gap: 10px; margin-top: 24px; }
+  button { font: inherit; padding: 9px 18px; border-radius: 8px; border: 1px solid #d1d5db; cursor: pointer; }
+  button.approve { background: #2563eb; color: #fff; border-color: #2563eb; }
+  button.deny { background: transparent; }
+</style>
+</head>
+<body>
+  <h1>Allow ${title}?</h1>
+  <p class="muted">${escapeHtml(request.client ?? request.agentId)} · expires ${escapeHtml(request.expiresAt)}</p>
+  <p>High-sensitivity tags are unchecked by default. If you select one, choose the keys it may read.</p>
+  <form method="post" action="/consent/${encodeURIComponent(request.requestId)}">
+    <input type="hidden" name="secret" value="${escapeHtml(secret)}">
+    ${rows || '<p class="muted">This request has no readable tags.</p>'}
+    <div class="actions">
+      <button class="approve" name="action" value="approve" type="submit">Approve</button>
+      <button class="deny" name="action" value="deny" type="submit">Deny</button>
+    </div>
+  </form>
+</body>
+</html>`;
+  }
+
 
   listConsentRequests(status: ConsentRequestStatus = 'pending'): ConsentRequest[] {
     const rows = this.db.prepare('SELECT * FROM consent_requests WHERE status = ? ORDER BY created_at DESC')
@@ -625,6 +886,12 @@ export class AuthService {
       SET status = 'approved', approved_at = ?, granted_scopes = ?
       WHERE request_id = ? AND status = 'pending'
     `).run(new Date().toISOString(), JSON.stringify(grantedScopes), requestId);
+
+    this.consentTokens.set(requestId, {
+      token: result.token,
+      expiresAt: result.expiresAt,
+      sessionId: request.sessionId,
+    });
 
     return {
       token: result.token,

@@ -5,6 +5,7 @@ import { join } from 'path';
 import { DEFAULT_HOST, DEFAULT_PORT, DATA_DIR_NAME, SECRETS_DIR_NAME } from '@uomp/core';
 import { AuthService, loadOrCreateAdminToken } from '@uomp/auth';
 import { MemoryGuard } from '@uomp/guard';
+import { MemoryStore } from '@uomp/store';
 import { JWTTokenIssuer } from '@uomp/token';
 
 async function main() {
@@ -26,6 +27,22 @@ async function main() {
     dbPath: authDbPath,
     issuer,
     adminToken,
+    consentKeyResolver: (tag: string) => {
+      const store = new MemoryStore({ dbPath: memoryDbPath });
+      try {
+        return store.getByTag(tag).map(item => {
+          const value = item.value as Record<string, unknown> | null | undefined;
+          const title = value?.title ?? value?.path ?? item.description;
+          return {
+            key: item.key,
+            ...(typeof title === 'string' ? { title } : {}),
+            sensitivity: item.sensitivity,
+          };
+        });
+      } finally {
+        store.close();
+      }
+    },
   });
 
   const guard = new MemoryGuard({

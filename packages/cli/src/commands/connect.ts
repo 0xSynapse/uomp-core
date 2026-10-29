@@ -171,7 +171,7 @@ async function configureOnDemand(
     console.log(chalk.gray(`    ${JSON.stringify(buildMcpConfig(client, envPath, entryOptions), null, 2)}`));
   }
   console.log('');
-  console.log(chalk.gray('The first tool call creates a consent request. Then run:'));
+  console.log(chalk.gray('The first tool call opens a local consent page. If it does not open, use:'));
   console.log(`  ${chalk.cyan('uomp pending')}`);
   console.log(`  ${chalk.cyan('uomp approve <request-id>')}`);
 }

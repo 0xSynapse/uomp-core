@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { createInterface } from 'readline';
+import { spawn } from 'child_process';
 import { join } from 'path';
 import { loadOrCreateAdminToken } from '@uomp/auth';
 import { UompConfig } from '../config.js';
@@ -19,6 +20,8 @@ interface McpOptions {
   onDemand?: boolean;
   requestScope?: string[];
   requestDuration?: string;
+  open?: boolean;
+  consentTimeout?: string;
 }
 
 interface JsonRpcMessage {
@@ -103,6 +106,8 @@ export class McpCommands {
       .option('--on-demand', 'Request approval when no valid session is available')
       .option('--request-scope <tags...>', 'Tags to request in on-demand mode')
       .option('--request-duration <minutes>', 'Requested session duration in on-demand mode', '30')
+      .option('--no-open', 'Do not open the consent page automatically')
+      .option('--consent-timeout <seconds>', 'How long to wait for approval in on-demand mode', '90')
       .action(async (options: McpOptions) => {
         try {
           const config = new UompConfig();
@@ -123,6 +128,10 @@ export class McpCommands {
   private requestScopes: string[] = [];
   private requestDuration = 30;
   private pendingRequestId?: string;
+  private pendingSecret?: string;
+  private pendingApprovalUrl?: string;
+  private noOpen = false;
+  private consentTimeoutSeconds = 90;
 
   constructor(config: UompConfig) {
     this.config = config;
@@ -135,6 +144,8 @@ export class McpCommands {
     this.client = parseMcpClient(options.client);
     this.requestScopes = options.requestScope ?? [];
     this.requestDuration = parseDurationOption(options.requestDuration);
+    this.noOpen = options.open === false;
+    this.consentTimeoutSeconds = parseTimeoutOption(options.consentTimeout);
 
     if (this.client !== 'generic' && !options.printConfig && !this.onDemand) {
       throw new Error('--client requires --print-config unless --on-demand is set.');
@@ -307,8 +318,7 @@ export class McpCommands {
       return false;
     }
 
-    await this.requestConsent();
-    return false;
+    return this.requestConsent();
   }
 
   private async tryLoadCredentials(): Promise<boolean> {
@@ -360,7 +370,7 @@ export class McpCommands {
     }
   }
 
-  private async requestConsent(): Promise<void> {
+  private async requestConsent(): Promise<boolean> {
     if (this.requestScopes.length === 0) {
       throw new Error('--on-demand requires --request-scope <tag...>.');
     }
@@ -399,20 +409,117 @@ export class McpCommands {
       );
     }
 
-    const body = await response.json() as { request_id?: string };
+    const body = await response.json() as {
+      request_id?: string;
+      approval_url?: string;
+    };
     if (!body.request_id) {
       throw new Error('Failed to create a consent request.');
     }
 
     this.pendingRequestId = body.request_id;
-    process.stderr.write(
-      `UOMP approval required. Run: uomp approve ${body.request_id}\n`
-    );
+    this.pendingApprovalUrl = body.approval_url;
+
+    if (body.approval_url) {
+      const parsed = new URL(body.approval_url);
+      this.pendingSecret = parsed.searchParams.get('secret') ?? undefined;
+      if (!this.noOpen) {
+        openUrl(body.approval_url);
+      }
+      process.stderr.write(`UOMP approval required: ${body.approval_url}\n`);
+    } else {
+      process.stderr.write(`UOMP approval required. Run: uomp approve ${body.request_id}\n`);
+    }
+
+    const approved = await this.waitForConsentApproval();
+    if (approved) {
+      this.pendingRequestId = undefined;
+      this.pendingApprovalUrl = undefined;
+      this.pendingSecret = undefined;
+    }
+    return approved;
+  }
+
+  private async waitForConsentApproval(): Promise<boolean> {
+    const deadline = Date.now() + this.consentTimeoutSeconds * 1000;
+
+    while (Date.now() < deadline) {
+      if (await this.tryLoadCredentials()) {
+        return true;
+      }
+
+      const status = await this.getConsentStatus();
+      if (status?.status === 'approved' && status.token) {
+        const envPath = this.sessionInput
+          ? resolveSessionPath(this.config, this.sessionInput)
+          : this.defaultEnvPath();
+        await writeSessionEnvFile(envPath, {
+          sessionId: status.session_id ?? '',
+          agentId: status.agent_id ?? (this.client === 'generic' ? 'mcp-client' : `mcp-client-${this.client}`),
+          expiresAt: status.token_expires_at ?? new Date().toISOString(),
+          token: status.token,
+          baseUrl: this.connectionUrl(),
+        });
+        this.credentials = {
+          token: status.token,
+          baseUrl: this.connectionUrl(),
+          source: envPath,
+        };
+        return true;
+      }
+
+      if (status?.status === 'denied' || status?.status === 'expired') {
+        this.pendingRequestId = undefined;
+        this.pendingApprovalUrl = undefined;
+        this.pendingSecret = undefined;
+        return false;
+      }
+
+      await sleep(1_000);
+    }
+
+    return false;
+  }
+
+  private async getConsentStatus(): Promise<{
+    status?: string;
+    token?: string;
+    token_expires_at?: string;
+    session_id?: string;
+    agent_id?: string;
+  } | undefined> {
+    if (!this.pendingRequestId) return undefined;
+
+    try {
+      const url = new URL(
+        `${this.connectionUrl()}/v1/consent/requests/${encodeURIComponent(this.pendingRequestId)}`
+      );
+      const headers: Record<string, string> = {};
+      if (this.pendingSecret) {
+        url.searchParams.set('secret', this.pendingSecret);
+      } else {
+        await this.config.init();
+        headers['x-uomp-admin-token'] = this.config.adminToken;
+      }
+
+      const response = await fetch(url, { headers });
+      if (!response.ok) return undefined;
+      return await response.json() as {
+        status?: string;
+        token?: string;
+        token_expires_at?: string;
+        session_id?: string;
+        agent_id?: string;
+      };
+    } catch {
+      return undefined;
+    }
   }
 
   private approvalMessage(): string {
     if (this.pendingRequestId) {
-      return `UOMP approval required. Run \`uomp approve ${this.pendingRequestId}\` in a terminal, then try again.`;
+      const url = this.pendingApprovalUrl ? ` Open: ${this.pendingApprovalUrl}` : '';
+      return `UOMP approval required. Run \`uomp approve ${this.pendingRequestId}\` in a terminal, then try again.${url}`;
     }
     return 'No UOMP session. Run `uomp approve <request-id>` after a pending request, or re-run `uomp connect`.';
   }
@@ -534,6 +641,40 @@ function parseDurationOption(value?: string): number {
     throw new Error(`Invalid --request-duration "${value}". Use whole minutes between 1 and 1440.`);
   }
   return minutes;
+}
+
+function parseTimeoutOption(value?: string): number {
+  const seconds = Number(value ?? '90');
+  if (!Number.isInteger(seconds) || seconds < 1 || seconds > 600) {
+    throw new Error(`Invalid --consent-timeout "${value}". Use whole seconds between 1 and 600.`);
+  }
+  return seconds;
+}
+
+function openUrl(url: string): void {
+  const command = process.platform === 'darwin'
+    ? 'open'
+    : process.platform === 'win32'
+      ? 'cmd'
+      : 'xdg-open';
+  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
+
+  try {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.on('error', () => {
+      // The URL is printed to stderr as a fallback.
+    });
+    child.unref();
+  } catch {
+    // The URL is printed to stderr as a fallback.
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function readJson(response: Response): Promise<any> {

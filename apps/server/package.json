@@ -16,7 +16,8 @@
     "@uomp/auth": "workspace:*",
     "@uomp/guard": "workspace:*",
     "@uomp/token": "workspace:*",
-    "@hono/node-server": "^1.11.0"
+    "@hono/node-server": "^1.11.0",
+    "@uomp/store": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

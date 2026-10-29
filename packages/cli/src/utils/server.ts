@@ -2,6 +2,7 @@ import net from 'net';
 import { serve } from '@hono/node-server';
 import { AuthService } from '@uomp/auth';
 import { MemoryGuard } from '@uomp/guard';
+import { MemoryStore } from '@uomp/store';
 import { JWTTokenIssuer } from '@uomp/token';
 import { formatServerUrl, type UompConfig } from '../config.js';
 
@@ -37,6 +38,22 @@ export async function createUompRuntime(config: UompConfig): Promise<UompRuntime
     dbPath: config.authDbPath,
     issuer,
     adminToken: config.adminToken,
+    consentKeyResolver: (tag: string) => {
+      const store = new MemoryStore({ dbPath: config.memoryDbPath });
+      try {
+        return store.getByTag(tag).map(item => {
+          const value = item.value as Record<string, unknown> | null | undefined;
+          const title = value?.title ?? value?.path ?? item.description;
+          return {
+            key: item.key,
+            ...(typeof title === 'string' ? { title } : {}),
+            sensitivity: item.sensitivity,
+          };
+        });
+      } finally {
+        store.close();
+      }
+    },
   });
 
   const guard = new MemoryGuard({
