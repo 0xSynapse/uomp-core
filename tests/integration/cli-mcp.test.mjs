@@ -158,26 +158,25 @@ test('mcp serves authorized memory over stdio', async t => {
 
   await waitForServer(port);
 
+  const envPath = join(home, 'mcp-session.env');
   const authorized = runCli(home, [
     'authorize', agent,
     '--scope', 'notes/projects',
     '--no-server',
     '--port', String(port),
+    '--output', envPath,
   ]);
   assert.equal(authorized.status, 0, authorized.stderr);
 
   const sessionId = /Session granted: (sess_\S+)/.exec(authorized.stdout)[1];
 
-  const printed = runCli(home, ['mcp', '--session', sessionId, '--print-config']);
+  const printed = runCli(home, ['mcp', '--session', envPath, '--print-config']);
   assert.equal(printed.status, 0, printed.stderr);
   const clientConfig = JSON.parse(printed.stdout);
   assert.ok(clientConfig.mcpServers.uomp.args.includes('mcp'));
-  assert.equal(
-    clientConfig.mcpServers.uomp.args.at(-1),
-    join(home, '.uomp', 'sessions', `${sessionId}.env`)
-  );
+  assert.equal(clientConfig.mcpServers.uomp.args.at(-1), envPath);
 
-  const mcp = startMcp(home, sessionId);
+  const mcp = startMcp(home, envPath);
   t.after(() => mcp.kill());
 
   const initialized = await mcp.request('initialize', {
@@ -228,6 +227,32 @@ test('mcp serves authorized memory over stdio', async t => {
   });
   assert.equal(denied.result.isError, true);
   assert.match(denied.result.content[0].text, /ACCESS_DENIED/);
+
+  const revoked = runCli(home, ['revoke', sessionId]);
+  assert.equal(revoked.status, 0, revoked.stderr);
+
+  const afterRevoke = await mcp.request('tools/call', {
+    name: 'list_memory',
+    arguments: { tag: 'notes/projects' },
+  });
+  assert.equal(afterRevoke.result.isError, true);
+  assert.match(afterRevoke.result.content[0].text, /SESSION_NOT_ACTIVE/);
+
+  const reauthorized = runCli(home, [
+    'authorize', agent,
+    '--scope', 'notes/projects',
+    '--no-server',
+    '--port', String(port),
+    '--output', envPath,
+  ]);
+  assert.equal(reauthorized.status, 0, reauthorized.stderr);
+
+  const afterReauthorize = await mcp.request('tools/call', {
+    name: 'list_memory',
+    arguments: { tag: 'notes/projects' },
+  });
+  assert.equal(afterReauthorize.result.isError, false);
+  assert.match(afterReauthorize.result.content[0].text, /note\.projects\.plan/);
 
   const exitCode = await mcp.close();
   assert.equal(exitCode, 0);
