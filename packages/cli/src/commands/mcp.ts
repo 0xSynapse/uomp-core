@@ -11,6 +11,7 @@ import {
 } from '../utils/session-env.js';
 import { clientLabel, parseMcpClient, printClientConfig, type ConnectClient } from '../utils/mcp-config.js';
 import { writeSessionEnvFile } from '../utils/session-env-file.js';
+import { notifyConsentRequest } from '../utils/notify.js';
 
 interface McpOptions {
   session?: string;
@@ -22,6 +23,7 @@ interface McpOptions {
   requestDuration?: string;
   open?: boolean;
   consentTimeout?: string;
+  notify?: boolean;
 }
 
 interface JsonRpcMessage {
@@ -107,6 +109,7 @@ export class McpCommands {
       .option('--request-scope <tags...>', 'Tags to request in on-demand mode')
       .option('--request-duration <minutes>', 'Requested session duration in on-demand mode', '30')
       .option('--no-open', 'Do not open the consent page automatically')
+      .option('--no-notify', 'Do not send a desktop notification for consent requests')
       .option('--consent-timeout <seconds>', 'How long to wait for approval in on-demand mode', '90')
       .action(async (options: McpOptions) => {
         try {
@@ -131,6 +134,7 @@ export class McpCommands {
   private pendingSecret?: string;
   private pendingApprovalUrl?: string;
   private noOpen = false;
+  private notify = true;
   private consentTimeoutSeconds = 90;
 
   constructor(config: UompConfig) {
@@ -145,6 +149,7 @@ export class McpCommands {
     this.requestScopes = options.requestScope ?? [];
     this.requestDuration = parseDurationOption(options.requestDuration);
     this.noOpen = options.open === false;
+    this.notify = options.notify !== false;
     this.consentTimeoutSeconds = parseTimeoutOption(options.consentTimeout);
 
     if (this.client !== 'generic' && !options.printConfig && !this.onDemand) {
@@ -377,6 +382,7 @@ export class McpCommands {
 
     await this.config.init();
     const client = this.client === 'generic' ? 'mcp-client' : this.client;
+    const agentName = client === 'mcp-client' ? 'MCP Client' : clientLabel(this.client as ConnectClient);
     const envPath = this.sessionInput
       ? resolveSessionPath(this.config, this.sessionInput)
       : this.defaultEnvPath();
@@ -390,7 +396,7 @@ export class McpCommands {
       body: JSON.stringify({
         client,
         agent_id: client === 'mcp-client' ? 'mcp-client' : `mcp-client-${client}`,
-        agent_name: client === 'mcp-client' ? 'MCP Client' : clientLabel(this.client as ConnectClient),
+        agent_name: agentName,
         requested_scopes: {
           read: { tags: this.requestScopes, keys: [], denyTags: [], denyKeys: [] },
           write: { tags: [], keys: [], denyTags: [], denyKeys: [] },
@@ -425,6 +431,13 @@ export class McpCommands {
       this.pendingSecret = parsed.searchParams.get('secret') ?? undefined;
       if (!this.noOpen) {
         openUrl(body.approval_url);
+      }
+      if (this.notify) {
+        notifyConsentRequest({
+          title: 'UOMP approval required',
+          body: `${agentName} requests ${this.requestScopes.join(', ')}`,
+          url: body.approval_url,
+        });
       }
       process.stderr.write(`UOMP approval required: ${body.approval_url}\n`);
     } else {

@@ -234,7 +234,7 @@ If you do not want to pre-authorize, add `--on-demand`:
 uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects --on-demand
 ```
 
-The first tool call creates a pending consent request and opens a local approval page. Approve in the browser and the same tool call continues. If the page does not open, run `uomp pending` and `uomp approve <request-id>`; `--no-open` disables auto-open. `uomp deny <request-id>` closes the request without granting access. When the token expires, the next tool call creates a new request.
+The first tool call creates a pending consent request and opens a local approval page. Approve in the browser and the same tool call continues. On Linux/macOS UOMP also sends a desktop notification. If the page does not open, run `uomp pending` and `uomp approve <request-id>`; `--no-open` disables auto-open and `--no-notify` disables notifications. `uomp deny <request-id>` closes the request without granting access. When the token expires, the next tool call creates a new request.
 
 **Authorize an agent package**
 
@@ -585,7 +585,7 @@ Cursor 用 `uomp connect cursor`，OpenCode 用 `uomp connect opencode`。重新
 uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects --on-demand
 ```
 
-第一次工具调用会创建一个待审批请求，并自动打开本地审批页面。在浏览器里点 Approve，当前工具调用会继续执行。页面没有打开时，用 `uomp pending` 和 `uomp approve <request-id>`；`--no-open` 可以关闭自动打开。`uomp deny <request-id>` 会关闭请求且不授权。token 过期后，下一次工具调用会创建新的请求。
+第一次工具调用会创建一个待审批请求，并自动打开本地审批页面。在浏览器里点 Approve，当前工具调用会继续执行。Linux/macOS 下还会发送桌面通知。页面没有打开时，用 `uomp pending` 和 `uomp approve <request-id>`；`--no-open` 关闭自动打开，`--no-notify` 关闭通知。`uomp deny <request-id>` 会关闭请求且不授权。token 过期后，下一次工具调用会创建新的请求。
 
 **授权一个 Agent 包**
 
