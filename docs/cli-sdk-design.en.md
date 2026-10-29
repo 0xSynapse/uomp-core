@@ -554,7 +554,7 @@ The current Phase 1 only considers local Agents. In the long term, UOMP must sup
 
 Most Agents will eventually run as **services** on remote servers rather than on the same device as the user:
 
-- The user authorizes via phone, browser, or lightweight CLI.
+- The user authorizes via a lightweight CLI or local UI.
 - The Agent runs in the cloud or on a third-party server.
 - The Agent is not on the same local network as the user's device.
 

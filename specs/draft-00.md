@@ -11,8 +11,8 @@
 | Date | Change |
 |------|--------|
 | 2026-07-12 | Draft-00 initial release. |
-| 2026-07-23 | Added Browser Profile (§5.3), Cloud Relay (§15.7), Store abstraction (§0), Payload API (§15.6). Updated `uom.json` schema (§6.2-6.4) with `fields`, `purposes`, `external_data_sources`, `package`. Updated Architecture diagram to include Gateway, Relay, and Browser path. Added FHE to Future Work (§22). Marked on-chain audit as Phase 4. |
-| 2026-10-29 | Local-first reference implementation: CLI + stdio MCP path, 0600 session env delivery, Auth + Guard combined service. Reworked §5 architecture and diagrams; Browser and Remote profiles are explicitly optional/preview. |
+| 2026-07-23 | Added Cloud Relay (§15.7), Store abstraction (§0), Payload API (§15.6). Updated `uom.json` schema (§6.2-6.4) with `fields`, `purposes`, `external_data_sources`, `package`. Updated the architecture diagram to include Gateway and Relay. Added FHE to Future Work (§22). Marked on-chain audit as Phase 4. |
+| 2026-10-29 | Local-first reference implementation: CLI + stdio MCP path, 0600 session env delivery, Auth + Guard combined service. Reworked §5 architecture and diagrams; Remote remains optional/preview. |
 
 ---
 
@@ -24,7 +24,7 @@ User-Owned Memory Protocol（UOMP）定义了一种用户主权型授权协议�
 
 本文档为 UOMP 协议草案（Draft-00），描述协议设计意图、数据格式、HTTP API 和安全要求。本文档旨在通过公开讨论后演进为正式标准。本文档中的关键词 "MUST"、"MUST NOT"、"REQUIRED"、"SHALL"、"SHALL NOT"、"SHOULD"、"SHOULD NOT"、"RECOMMENDED"、"MAY"、"OPTIONAL" 按照 [RFC 2119](https://datatracker.ietf.org/doc/html/rfc2119) 解释。
 
-> **参考实现状态（2026-10）：** 当前 `uomp` CLI 优先实现 Local Profile：`import`、`authorize`（写入 `0600` 会话 env 文件）、`serve`、`mcp`、`sessions`、`audit`、`revoke`。stdio MCP bridge 为实验能力。Browser Profile、Remote Profile 和 Cloud Relay 是可选/预览能力，不是通过一致性验证的必要条件。
+> **参考实现状态（2026-10）：** 当前 `uomp` CLI 优先实现 Local Profile：`import`、`authorize`（写入 `0600` 会话 env 文件）、`serve`、`mcp`、`sessions`、`audit`、`revoke`。stdio MCP bridge 为实验能力。Remote Profile 和 Cloud Relay 是可选/预览能力，不是通过一致性验证的必要条件。
 
 ## 3. Introduction
 
@@ -68,7 +68,6 @@ UOMP 的设计目标是：
 | **uom.json** | Agent 声明文件，描述 Agent 身份和默认请求的记忆范围。 |
 | **Local Profile** | 本机部署模式，Memory Guard 监听 `127.0.0.1`；默认且当前实现。 |
 | **Remote Profile** | 远程部署模式，Agent 经 Gateway 访问 Guard；可选/高级。 |
-| **Browser Profile** | 浏览器/钱包部署模式；预览/非核心。 |
 
 ## 5. Protocol Overview
 
@@ -77,7 +76,6 @@ UOMP 的设计目标是：
 <img src="https://www.uomp.org/diagrams/spec-architecture-local-zh.svg" alt="本地路径：CLI 授权 → 0600 env 文件 → Agent/MCP 客户端 → Auth + Guard → Store/Audit" class="diagram" />
 <img src="https://www.uomp.org/diagrams/spec-architecture-mcp-zh.svg" alt="MCP 路径：MCP 客户端 → stdio bridge → Auth + Guard → Store/Audit" class="diagram" />
 <img src="https://www.uomp.org/diagrams/spec-architecture-remote-zh.svg" alt="远程路径（可选）：Remote Agent → Gateway → Guard → Store" class="diagram" />
-<img src="https://www.uomp.org/diagrams/spec-architecture-browser-zh.svg" alt="浏览器路径（预览）：钱包 → Gateway/Guard → Store" class="diagram" />
 
 UOMP 的完整架构包含以下组件：
 
@@ -88,19 +86,17 @@ UOMP 的完整架构包含以下组件：
 | **Memory Guard** | 用户本机 | Token 校验、scope 过滤、聚合查询、审计日志记录。 |
 | **CLI** | 用户本机 | 用户交互：导入、授权、会话、审计、撤销。 |
 | **MCP bridge** | 用户本机（可选） | stdio MCP 适配器（`uomp mcp`）：Claude Desktop / Cursor / OpenCode → HTTP Guard。实验能力。 |
-| **Browser UI** | 浏览器（预览） | 钱包认证 + 加密存储；不属于当前核心路径。 |
 | **Gateway** | 用户本机（可选） | mTLS 隧道 + Token 转发，将 Guard 暴露给远程 Agent。支持 Cloudflare Tunnel。 |
 | **Cloud Relay** | 公共网络（设计/预览） | 无状态公共中继，仅需 Guard 公钥即可验证 Token 并转发请求。 |
 | **Agent** | 任意位置 | 独立进程，携带 Capability Token 通过 Guard 或 Gateway 读取数据。 |
 
-四条访问路径：
+三条访问路径：
 
 1. **本地（默认）**：CLI 完成授权并把 Token 写入 `0600` 会话 env 文件；Agent 直接访问 `127.0.0.1:9374` 上的 Guard。
 2. **MCP（本地适配器，实验）**：MCP 客户端通过 stdio 启动 `uomp mcp`；bridge 读取同一个会话 env 文件，再以 HTTP + Token 访问 Guard。MCP bridge 不引入新的信任边界。
 3. **远程（可选/高级）**：Agent 通过 Gateway（mTLS + Tunnel）访问 Guard。
-4. **浏览器（预览）**：用户通过浏览器 Dashboard 连接钱包（MetaMask/Argent X），加密存储于 Dropbox，通过 Gateway 调用 Guard 和 Agent；不属于当前核心路径。
 
-Local Profile 和它的 MCP 适配器是当前参考实现的主路径；Remote Profile 与 Browser Profile 是可选扩展，不要求所有实现支持。
+Local Profile 和它的 MCP 适配器是当前参考实现的主路径；Remote Profile 是可选扩展，不要求所有实现支持。
 
 ### 5.2 Flow
 
@@ -118,15 +114,14 @@ MCP bridge 遵循同样的步骤 4-6，只是把 Agent 侧传输从直接 HTTP �
 
 ### 5.3 Profiles
 
-UOMP 定义三种部署配置：
+UOMP 定义两种部署配置：
 
 | Profile | 默认端口 | 传输 | 认证 | 存储 | 状态 |
 |---------|---------|------|------|------|------|
 | Local Profile | `127.0.0.1:9374` | HTTP | Capability Token | SQLite（本地） | 默认 / 当前实现 |
 | Remote Profile | 用户配置 | HTTPS | Capability Token + mTLS | 用户指定 | 可选 / 高级 |
-| Browser Profile | Gateway URL | HTTPS + CORS | 钱包签名（预览） + Capability Token | Dropbox（加密对象） | 预览 / 非核心 |
 
-Local Profile 为默认且 RECOMMENDED 配置，也是参考实现的主路径。Remote Profile 必须显式开启。Browser Profile 适用于零安装场景，用户通过钱包签名派生加密密钥（PBKDF2），数据以密文形式存入 Dropbox，服务器端零知识；该配置目前是预览，不是一致性要求。
+Local Profile 为默认且 RECOMMENDED 配置，也是参考实现的主路径。Remote Profile 必须显式开启。
 
 MCP bridge 不是独立 Profile，而是 Local Profile 上的可选 stdio 适配器。
 
@@ -1036,7 +1031,7 @@ Cloud Relay 是无状态公共中继服务，允许 Agent 通过公共网络访�
 | 认证方式 | mTLS（双向证书） | 公钥验签（Ed25519） |
 | 需要配置 | 是（TLS 证书） | 否（零配置） |
 | 隧道 | Cloudflare Tunnel | 用户独立隧道或其他 |
-| 适用场景 | 用户可控环境 | 非技术用户、浏览器端 |
+| 适用场景 | 用户可控环境 | 非技术用户、公共中继 |
 
 **工作流**：
 
@@ -1220,7 +1215,7 @@ GET /v1/audit/session/{sessionId}
 
 #### 18.4.3 Paymaster
 
-Starknet 原生支持 paymaster（代付 gas）。Agent 或 relay 可 sponsor 交易，用户无需为每次 Access event 付费。授权时用户的钱包仅需签名一次。
+Starknet 原生支持 paymaster（代付 gas）。Agent 或 relay 可 sponsor 交易，用户无需为每次 Access event 付费。授权时用户只需签名一次。
 
 #### 18.4.4 FHE Extension (Future)
 
