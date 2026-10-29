@@ -1,6 +1,6 @@
-import { dirname, join, resolve } from 'path';
+import { join, resolve } from 'path';
 import { existsSync } from 'fs';
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'fs/promises';
+import { rm, readFile } from 'fs/promises';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { UompConfig } from '../config.js';
@@ -19,6 +19,7 @@ import {
 } from '../utils/server.js';
 import { startDetachedServer, stopDetachedServer, type StartDetachedResult } from '../utils/server-process.js';
 import { formatDateTime, formatScopes, sanitizeText } from '../utils/format.js';
+import { writeSessionEnvFile } from '../utils/session-env-file.js';
 import {
   clientLabel,
   printClientConfig,
@@ -116,7 +117,13 @@ export class AuthorizeCommands {
     await this.revokePreviousSession(runtime, envPath);
 
     try {
-      await this.writeSessionEnv(envPath, session.sessionId, manifest.agent.id, grant.expiresAt, grant.token);
+      await writeSessionEnvFile(envPath, {
+        sessionId: session.sessionId,
+        agentId: manifest.agent.id,
+        expiresAt: grant.expiresAt,
+        token: grant.token,
+        baseUrl: this.config.serverUrl,
+      });
     } catch (error) {
       await this.abortSession(runtime, session.sessionId);
       throw error;
@@ -485,34 +492,6 @@ export class AuthorizeCommands {
       }
     } catch {
       // No existing env file, or it does not contain a session header.
-    }
-  }
-
-  private async writeSessionEnv(
-    envPath: string,
-    sessionId: string,
-    agentId: string,
-    expiresAt: string,
-    token: string
-  ): Promise<void> {
-    await mkdir(dirname(envPath), { recursive: true, mode: 0o700 });
-    const envBlock = [
-      `# UOMP session ${sanitizeText(sessionId)}`,
-      `# agent: ${sanitizeText(agentId)}`,
-      `# expires: ${sanitizeText(expiresAt)}`,
-      `export UOM_TOKEN=${shellQuote(token)}`,
-      `export UOMP_BASE_URL=${shellQuote(this.config.serverUrl)}`,
-      '',
-    ].join('\n');
-
-    const tempPath = `${envPath}.${process.pid}.${Date.now()}.tmp`;
-    try {
-      await writeFile(tempPath, envBlock, { mode: 0o600, flag: 'wx' });
-      await chmod(tempPath, 0o600);
-      await rename(tempPath, envPath);
-    } catch (error) {
-      await rm(tempPath, { force: true }).catch(() => {});
-      throw error;
     }
   }
 

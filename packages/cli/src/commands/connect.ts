@@ -4,8 +4,16 @@ import { existsSync } from 'fs';
 import { join, resolve } from 'path';
 import { UompConfig } from '../config.js';
 import { AuthorizeCommands } from './authorize.js';
-import { isConnectClient, type ConnectClient } from '../utils/mcp-config.js';
+import {
+  buildMcpConfig,
+  clientLabel,
+  isConnectClient,
+  printClientConfig,
+  upsertMcpClientConfig,
+  type ConnectClient,
+} from '../utils/mcp-config.js';
 import { parseHost, parsePort } from '../utils/server.js';
+import { startDetachedServer } from '../utils/server-process.js';
 import { MemoryStore } from '@uomp/store';
 import { importMarkdown } from '../utils/markdown.js';
 import { printMarkdownImportResult } from '../utils/import-output.js';
@@ -26,6 +34,7 @@ interface ConnectOptions {
   printToken?: boolean;
   vault?: string;
   vaultTag?: string;
+  onDemand?: boolean;
 }
 
 export class ConnectCommands {
@@ -47,6 +56,7 @@ export class ConnectCommands {
       .option('--config <file>', 'Write the MCP client config to a custom path')
       .option('--vault <path>', 'Import a Markdown vault or file before connecting')
       .option('--vault-tag <tag>', 'Base tag for --vault imports', 'notes')
+      .option('--on-demand', 'Ask for consent on the first tool call instead of pre-authorizing')
       .option('--print-token', 'Print the capability token')
       .action(async (target: string, options: ConnectOptions) => {
         try {
@@ -63,6 +73,14 @@ export class ConnectCommands {
 
           if (options.vault) {
             await importVault(config, options.vault, options.vaultTag ?? 'notes');
+          }
+
+          if (options.onDemand) {
+            if (!resolved.client) {
+              throw new Error('--on-demand is only available for Claude Desktop, Cursor, or OpenCode.');
+            }
+            await configureOnDemand(resolved.client, config, options);
+            return;
           }
 
           const authorizer = new AuthorizeCommands(config);
@@ -86,6 +104,84 @@ export class ConnectCommands {
         }
       });
   }
+}
+
+async function configureOnDemand(
+  client: ConnectClient,
+  config: UompConfig,
+  options: ConnectOptions
+): Promise<void> {
+  if (!options.scope || options.scope.length === 0) {
+    throw new Error('--on-demand requires --scope <tag...>.');
+  }
+  if (options.foreground) {
+    throw new Error('--on-demand uses the background server. Use --no-server if you manage the server yourself.');
+  }
+  if (options.allowKey || options.allowHigh) {
+    throw new Error('--allow-key/--allow-high belong to `uomp approve`, not `connect --on-demand`.');
+  }
+  if (options.printToken) {
+    throw new Error('--print-token is not available in on-demand mode; the token is issued after approval.');
+  }
+
+  await config.init();
+  const envPath = options.output
+    ? resolve(options.output)
+    : join(config.sessionsDir, `${client}.env`);
+  const requestDuration = parseRequestDuration(options.duration);
+  const entryOptions = {
+    onDemand: true,
+    requestScopes: options.scope,
+    requestDuration,
+  };
+
+  if (options.printConfig) {
+    process.stdout.write(`${JSON.stringify(buildMcpConfig(client, envPath, entryOptions), null, 2)}\n`);
+    return;
+  }
+
+  let serverNote = 'not started';
+  if (options.server !== false) {
+    const server = await startDetachedServer(config);
+    if (server.status === 'started') {
+      serverNote = `running in the background on ${server.url} (pid ${server.state.pid})`;
+    } else if (server.status === 'running') {
+      serverNote = `already running in the background on ${server.url}`;
+    } else {
+      serverNote = `already running on ${server.url}`;
+    }
+  }
+
+  let configResult: Awaited<ReturnType<typeof upsertMcpClientConfig>> | undefined;
+  if (!options.skipConfig) {
+    configResult = await upsertMcpClientConfig(client, envPath, options.config, entryOptions);
+  }
+
+  console.log(chalk.green(`On-demand consent configured for ${clientLabel(client)}.`));
+  console.log(`  Env file  ${envPath}`);
+  console.log(`  Server    ${serverNote}`);
+  if (configResult) {
+    console.log(`  Config    ${configResult.path}`);
+    if (configResult.backupPath) {
+      console.log(chalk.gray(`  Backup    ${configResult.backupPath}`));
+    }
+  } else {
+    console.log(chalk.gray('  Client config skipped (--skip-config).'));
+    console.log(chalk.gray('  Manual config:'));
+    console.log(chalk.gray(`    ${JSON.stringify(buildMcpConfig(client, envPath, entryOptions), null, 2)}`));
+  }
+  console.log('');
+  console.log(chalk.gray('The first tool call creates a consent request. Then run:'));
+  console.log(`  ${chalk.cyan('uomp pending')}`);
+  console.log(`  ${chalk.cyan('uomp approve <request-id>')}`);
+}
+
+function parseRequestDuration(value?: string): number {
+  const minutes = Number(value ?? '30');
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+    throw new Error(`Invalid duration "${value}". Use whole minutes between 1 and 1440.`);
+  }
+  return minutes;
 }
 
 async function importVault(config: UompConfig, target: string, tag: string): Promise<void> {

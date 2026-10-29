@@ -30,7 +30,14 @@ export interface ClientConfigStatus {
   path: string;
   configured: boolean;
   sessionPath?: string;
+  onDemand?: boolean;
   error?: string;
+}
+
+export interface McpEntryOptions {
+  onDemand?: boolean;
+  requestScopes?: string[];
+  requestDuration?: number;
 }
 
 export function parseMcpClient(value?: string): McpClient {
@@ -65,9 +72,21 @@ export function getCliInvocation(): CliInvocation {
   };
 }
 
-export function buildMcpEntry(client: ConnectClient, sessionPath: string): Record<string, unknown> {
+export function buildMcpEntry(
+  client: ConnectClient,
+  sessionPath: string,
+  options: McpEntryOptions = {}
+): Record<string, unknown> {
   const invocation = getCliInvocation();
   const args = [...invocation.args, 'mcp', '--session', sessionPath];
+
+  if (options.onDemand) {
+    args.push('--on-demand', '--client', client);
+    for (const tag of options.requestScopes ?? []) {
+      args.push('--request-scope', tag);
+    }
+    args.push('--request-duration', String(options.requestDuration ?? 30));
+  }
 
   if (client === 'opencode') {
     return {
@@ -83,12 +102,16 @@ export function buildMcpEntry(client: ConnectClient, sessionPath: string): Recor
   };
 }
 
-export function buildMcpConfig(client: McpClient, sessionPath: string): Record<string, unknown> {
+export function buildMcpConfig(
+  client: McpClient,
+  sessionPath: string,
+  options: McpEntryOptions = {}
+): Record<string, unknown> {
   if (client === 'opencode') {
     return {
       mcp: {
         servers: {
-          uomp: buildMcpEntry(client, sessionPath),
+          uomp: buildMcpEntry(client, sessionPath, options),
         },
       },
     };
@@ -96,13 +119,17 @@ export function buildMcpConfig(client: McpClient, sessionPath: string): Record<s
 
   return {
     mcpServers: {
-      uomp: buildMcpEntry('claude', sessionPath),
+      uomp: buildMcpEntry('claude', sessionPath, options),
     },
   };
 }
 
-export function printClientConfig(client: McpClient, sessionPath: string): void {
-  process.stdout.write(`${JSON.stringify(buildMcpConfig(client, sessionPath), null, 2)}\n`);
+export function printClientConfig(
+  client: McpClient,
+  sessionPath: string,
+  options: McpEntryOptions = {}
+): void {
+  process.stdout.write(`${JSON.stringify(buildMcpConfig(client, sessionPath, options), null, 2)}\n`);
 
   if (client === 'claude') {
     process.stderr.write(`Add to ${defaultClientConfigPath('claude')}.\n`);
@@ -143,11 +170,17 @@ export function defaultClientConfigPath(
 export async function upsertMcpClientConfig(
   client: ConnectClient,
   sessionPath: string,
-  configPath?: string
+  configPath?: string,
+  entryOptions: McpEntryOptions = {}
 ): Promise<ClientConfigResult> {
   const targetPath = configPath ? resolve(configPath) : defaultClientConfigPath(client);
   const existing = await readExistingConfig(targetPath);
-  const next = mergeClientConfig(client, existing.value, buildMcpEntry(client, sessionPath), targetPath);
+  const next = mergeClientConfig(
+    client,
+    existing.value,
+    buildMcpEntry(client, sessionPath, entryOptions),
+    targetPath
+  );
 
   if (existing.exists && isDeepStrictEqual(existing.value, next)) {
     return { path: targetPath, action: 'unchanged', changed: false };
@@ -212,11 +245,13 @@ export async function inspectMcpClientConfig(
     }
 
     const sessionPath = findSessionPath(entry);
+    const onDemand = entryHasOnDemand(entry);
     return {
       client,
       path: targetPath,
       configured: true,
       ...(sessionPath ? { sessionPath } : {}),
+      ...(onDemand ? { onDemand: true } : {}),
     };
   } catch (error) {
     return { client, path: targetPath, configured: false, error: errorMessage(error) };
@@ -320,6 +355,15 @@ function findSessionPath(entry: Record<string, unknown>): string | undefined {
   const index = values.indexOf('--session');
   const sessionPath = index >= 0 ? values[index + 1] : undefined;
   return typeof sessionPath === 'string' ? sessionPath : undefined;
+}
+
+function entryHasOnDemand(entry: Record<string, unknown>): boolean {
+  const values = Array.isArray(entry.command)
+    ? entry.command
+    : Array.isArray(entry.args)
+      ? entry.args
+      : [];
+  return values.includes('--on-demand');
 }
 
 function errorMessage(error: unknown): string {

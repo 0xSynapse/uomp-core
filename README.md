@@ -121,6 +121,7 @@ Design principles:
 | MCP client setup | `uomp connect claude\|cursor\|opencode` writes the client config and starts the local server |
 | Server lifecycle | Background server from `connect` or `uomp start`; `uomp status`, `uomp stop` |
 | Disconnect | `uomp disconnect claude\|cursor\|opencode` removes the client entry and revokes its session |
+| On-demand consent | `connect --on-demand` plus `uomp pending` / `approve` / `deny` (experimental) |
 | MCP runtime | stdio server with `list_memory`, `search_memory`, and `read_memory` (experimental) |
 | Capability tokens | EdDSA-signed JWT, 30-minute default |
 | Enforcement | Memory Guard: scope filtering, aggregation, audit log |
@@ -224,6 +225,23 @@ No terminal needs to stay open. `uomp status` shows the background server and ac
 Use `uomp connect cursor` or `uomp connect opencode` for the other clients. Re-run the same command to renew; the previous session is revoked, the token is refreshed, and the client does not need a restart. `--foreground` keeps the server in this terminal; `--print-config` prints the JSON without writing it; `--skip-config` grants only.
 
 High-sensitivity tags (for example `portfolio:holdings`, or items imported with `sensitivity: high`) are never selected by default. In an interactive run, select the tag and then choose keys individually. In scripts, grant keys explicitly with `--allow-key <key...>`, or use `--allow-high <tag...>` to explicitly allow every key under a high-sensitivity tag.
+
+**On-demand consent (experimental)**
+
+If you do not want to pre-authorize, add `--on-demand`:
+
+```bash
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects --on-demand
+```
+
+The first tool call creates a pending consent request. Run:
+
+```bash
+uomp pending
+uomp approve <request-id>
+```
+
+The next tool call picks up the token. `uomp deny <request-id>` closes the request without granting access. When the token expires, the next tool call creates a new request.
 
 **Authorize an agent package**
 
@@ -461,6 +479,7 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 | MCP 客户端配置 | `uomp connect claude\|cursor\|opencode` 自动写配置并启动本地服务 |
 | 服务生命周期 | `connect` 或 `uomp start` 后台启动；`uomp status`、`uomp stop` |
 | 断开客户端 | `uomp disconnect claude\|cursor\|opencode` 移除客户端条目并撤销会话 |
+| 按需授权 | `connect --on-demand` + `uomp pending` / `approve` / `deny`（实验） |
 | MCP 运行时 | stdio server，提供 `list_memory`、`search_memory` 和 `read_memory`（实验） |
 | Capability Token | EdDSA 签名 JWT，默认 30 分钟 |
 | 执行 | Memory Guard：范围过滤、聚合、审计日志 |
@@ -564,6 +583,23 @@ uomp connect claude --scope notes/projects
 Cursor 用 `uomp connect cursor`，OpenCode 用 `uomp connect opencode`。重新执行同一条命令即可续期：旧会话会被撤销、token 会刷新，客户端不需要重启。`--foreground` 让 server 留在当前终端；`--print-config` 只打印 JSON 不写文件；`--skip-config` 只授权不写配置。
 
 高敏 tag（例如 `portfolio:holdings`，或以 `sensitivity: high` 导入的数据）默认不会被选中。交互运行时先选 tag，再逐个选择 key；脚本里用 `--allow-key <key...>` 显式授权，或用 `--allow-high <tag...>` 显式放开某个高敏 tag 下的全部 key。
+
+**按需授权（实验）**
+
+如果不想预先授权，加 `--on-demand`：
+
+```bash
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects --on-demand
+```
+
+第一次工具调用会创建一个待审批请求。运行：
+
+```bash
+uomp pending
+uomp approve <request-id>
+```
+
+下一次工具调用就会拿到 token。`uomp deny <request-id>` 会关闭请求且不授权。token 过期后，下一次工具调用会创建新的请求。
 
 **授权一个 Agent 包**
 

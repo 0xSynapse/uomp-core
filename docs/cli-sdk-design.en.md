@@ -21,6 +21,12 @@ uomp audit
 uomp disconnect claude
 uomp stop
 uomp revoke <session-id>
+
+# on-demand consent (experimental)
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects --on-demand
+uomp pending
+uomp approve <request-id>
+uomp deny <request-id>
 ```
 
 Manual fallback (unsupported clients):
@@ -227,6 +233,9 @@ portfolio:holdings (8 records)
 | `uomp start` | Start the UOMP server in the background |
 | `uomp stop` | Stop the background UOMP server |
 | `uomp disconnect <client>` | Remove the client config entry and revoke its session |
+| `uomp pending` | List on-demand consent requests waiting for approval |
+| `uomp approve <request-id>` | Approve a request and write its session token |
+| `uomp deny <request-id>` | Deny a request and close its session |
 | `uomp sessions` | View active sessions |
 | `uomp revoke <session-id>` | Revoke session |
 | `uomp audit` | View access audit log |

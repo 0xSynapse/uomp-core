@@ -1,14 +1,24 @@
 import { Command } from 'commander';
 import { createInterface } from 'readline';
+import { join } from 'path';
+import { loadOrCreateAdminToken } from '@uomp/auth';
 import { UompConfig } from '../config.js';
-import { loadSessionCredentials, type SessionCredentials } from '../utils/session-env.js';
-import { parseMcpClient, printClientConfig } from '../utils/mcp-config.js';
+import {
+  loadSessionCredentials,
+  resolveSessionPath,
+  type SessionCredentials,
+} from '../utils/session-env.js';
+import { clientLabel, parseMcpClient, printClientConfig, type ConnectClient } from '../utils/mcp-config.js';
+import { writeSessionEnvFile } from '../utils/session-env-file.js';
 
 interface McpOptions {
   session?: string;
   baseUrl?: string;
   printConfig?: boolean;
   client?: string;
+  onDemand?: boolean;
+  requestScope?: string[];
+  requestDuration?: string;
 }
 
 interface JsonRpcMessage {
@@ -89,7 +99,10 @@ export class McpCommands {
       .option('-s, --session <session>', 'Session ID or path to a session env file')
       .option('--base-url <url>', 'Override the UOMP server URL')
       .option('--print-config', 'Print an MCP client config and exit')
-      .option('--client <client>', 'Config preset: claude, cursor, or opencode')
+      .option('--client <client>', 'Client label: claude, cursor, opencode, or generic')
+      .option('--on-demand', 'Request approval when no valid session is available')
+      .option('--request-scope <tags...>', 'Tags to request in on-demand mode')
+      .option('--request-duration <minutes>', 'Requested session duration in on-demand mode', '30')
       .action(async (options: McpOptions) => {
         try {
           const config = new UompConfig();
@@ -104,7 +117,12 @@ export class McpCommands {
   private config: UompConfig;
   private sessionInput?: string;
   private baseUrlOverride?: string;
-  private credentials!: SessionCredentials;
+  private credentials?: SessionCredentials;
+  private onDemand = false;
+  private client: ConnectClient | 'generic' = 'generic';
+  private requestScopes: string[] = [];
+  private requestDuration = 30;
+  private pendingRequestId?: string;
 
   constructor(config: UompConfig) {
     this.config = config;
@@ -113,42 +131,66 @@ export class McpCommands {
   async serve(options: McpOptions): Promise<void> {
     this.sessionInput = options.session;
     this.baseUrlOverride = options.baseUrl;
+    this.onDemand = options.onDemand === true;
+    this.client = parseMcpClient(options.client);
+    this.requestScopes = options.requestScope ?? [];
+    this.requestDuration = parseDurationOption(options.requestDuration);
 
-    const credentials = await loadSessionCredentials(this.config, options.session);
-    if (!credentials) {
+    if (this.client !== 'generic' && !options.printConfig && !this.onDemand) {
+      throw new Error('--client requires --print-config unless --on-demand is set.');
+    }
+
+    let credentials: SessionCredentials | null = null;
+    try {
+      credentials = await loadSessionCredentials(this.config, options.session);
+    } catch (error) {
+      if (!this.onDemand) throw error;
+    }
+
+    if (!credentials && !this.onDemand) {
       throw new Error(
-        'No UOMP session. Pass --session <id|env-file>, or set UOM_TOKEN and UOMP_BASE_URL.'
+        'No UOMP session. Pass --session <id|env-file>, set UOM_TOKEN and UOMP_BASE_URL, or use --on-demand.'
       );
     }
 
-    this.credentials = credentials;
-
-    const client = parseMcpClient(options.client);
-    if (client !== 'generic' && !options.printConfig) {
-      throw new Error('--client requires --print-config.');
-    }
+    this.credentials = credentials ?? undefined;
 
     if (options.printConfig) {
-      printClientConfig(client, credentials.source);
+      printClientConfig(this.client, credentials?.source ?? this.defaultEnvPath(), {
+        onDemand: this.onDemand,
+        requestScopes: this.requestScopes,
+        requestDuration: this.requestDuration,
+      });
       return;
     }
 
-    try {
-      await verifySession(this.connectionUrl(), credentials.token);
-    } catch (error) {
-      process.stderr.write(
-        `UOMP MCP warning: ${error instanceof Error ? error.message : String(error)}\n` +
-        'The server will re-read the session file on the next tool call.\n'
-      );
+    if (this.credentials) {
+      try {
+        await verifySession(this.connectionUrl(), this.credentials.token);
+      } catch (error) {
+        process.stderr.write(
+          `UOMP MCP warning: ${error instanceof Error ? error.message : String(error)}\n` +
+          'The server will re-read the session file on the next tool call.\n'
+        );
+      }
     }
 
-    process.stderr.write(`UOMP MCP server ready: ${this.connectionUrl()} (${credentials.source})\n`);
+    process.stderr.write(
+      `UOMP MCP server ready: ${this.connectionUrl()} (${this.credentials?.source ?? 'on-demand'})\n`
+    );
 
     await this.run();
   }
 
+  private defaultEnvPath(): string {
+    const client = this.client === 'generic' ? 'mcp-client' : this.client;
+    return join(this.config.sessionsDir, `${client}.env`);
+  }
+
   private connectionUrl(): string {
-    return normalizeBaseUrl(this.baseUrlOverride ?? this.credentials.baseUrl);
+    return normalizeBaseUrl(
+      this.baseUrlOverride ?? this.credentials?.baseUrl ?? this.config.serverUrl
+    );
   }
 
   private async refreshCredentials(): Promise<void> {
@@ -239,13 +281,157 @@ export class McpCommands {
     }
   }
 
+  private async ensureCredentials(): Promise<boolean> {
+    if (this.pendingRequestId) {
+      if (await this.tryLoadCredentials()) {
+        this.pendingRequestId = undefined;
+        return true;
+      }
+
+      const status = await this.pendingRequestStatus();
+      if (status === 'denied' || status === 'expired') {
+        this.pendingRequestId = undefined;
+        await this.requestConsent();
+      }
+      return false;
+    }
+
+    if (this.credentials) {
+      if (!this.onDemand || await this.tokenIsValid(this.credentials)) {
+        return true;
+      }
+      this.credentials = undefined;
+    }
+
+    if (!this.onDemand) {
+      return false;
+    }
+
+    await this.requestConsent();
+    return false;
+  }
+
+  private async tryLoadCredentials(): Promise<boolean> {
+    try {
+      const next = this.sessionInput
+        ? await loadSessionCredentials(this.config, this.sessionInput)
+        : (await loadSessionCredentials(this.config))
+          ?? await loadSessionCredentials(this.config, this.defaultEnvPath());
+      if (!next) return false;
+      if (!(await this.tokenIsValid(next))) return false;
+      this.credentials = next;
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async tokenIsValid(credentials: SessionCredentials): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.connectionUrl()}/v1/tokens/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: credentials.token }),
+      });
+      if (!response.ok) return false;
+      const body = await response.json() as { valid?: boolean };
+      return body.valid === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async pendingRequestStatus(): Promise<string | undefined> {
+    if (!this.pendingRequestId) return undefined;
+
+    try {
+      await this.config.init();
+      const response = await fetch(
+        `${this.connectionUrl()}/v1/consent/requests/${encodeURIComponent(this.pendingRequestId)}`,
+        {
+          headers: { 'x-uomp-admin-token': this.config.adminToken },
+        }
+      );
+      if (!response.ok) return undefined;
+      const body = await response.json() as { status?: string };
+      return body.status;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async requestConsent(): Promise<void> {
+    if (this.requestScopes.length === 0) {
+      throw new Error('--on-demand requires --request-scope <tag...>.');
+    }
+
+    await this.config.init();
+    const client = this.client === 'generic' ? 'mcp-client' : this.client;
+    const envPath = this.sessionInput
+      ? resolveSessionPath(this.config, this.sessionInput)
+      : this.defaultEnvPath();
+
+    const response = await fetch(`${this.connectionUrl()}/v1/consent/requests`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-uomp-admin-token': this.config.adminToken,
+      },
+      body: JSON.stringify({
+        client,
+        agent_id: client === 'mcp-client' ? 'mcp-client' : `mcp-client-${client}`,
+        agent_name: client === 'mcp-client' ? 'MCP Client' : clientLabel(this.client as ConnectClient),
+        requested_scopes: {
+          read: { tags: this.requestScopes, keys: [], denyTags: [], denyKeys: [] },
+          write: { tags: [], keys: [], denyTags: [], denyKeys: [] },
+        },
+        duration_minutes: this.requestDuration,
+        env_path: envPath,
+        base_url: this.connectionUrl(),
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+      throw new Error(
+        `Failed to create a consent request (${response.status}): ` +
+        (body?.error?.message ?? response.statusText)
+      );
+    }
+
+    const body = await response.json() as { request_id?: string };
+    if (!body.request_id) {
+      throw new Error('Failed to create a consent request.');
+    }
+
+    this.pendingRequestId = body.request_id;
+    process.stderr.write(
+      `UOMP approval required. Run: uomp approve ${body.request_id}\n`
+    );
+  }
+
+  private approvalMessage(): string {
+    if (this.pendingRequestId) {
+      return `UOMP approval required. Run \`uomp approve ${this.pendingRequestId}\` in a terminal, then try again.`;
+    }
+    return 'No UOMP session. Run `uomp approve <request-id>` after a pending request, or re-run `uomp connect`.';
+  }
+
   private async callTool(params: Record<string, unknown> | undefined): Promise<unknown> {
     const name = typeof params?.name === 'string' ? params.name : '';
     const args = (params?.arguments && typeof params.arguments === 'object')
       ? params.arguments as Record<string, unknown>
       : {};
+
+    if (!(await this.ensureCredentials())) {
+      return toolError(this.approvalMessage());
+    }
+
     const baseUrl = this.connectionUrl();
-    const token = this.credentials.token;
+    const token = this.credentials?.token;
+    if (!token) {
+      return toolError(this.approvalMessage());
+    }
 
     if (name === 'list_memory') {
       const tag = typeof args.tag === 'string' ? args.tag.trim() : '';
@@ -340,6 +526,14 @@ async function verifySession(baseUrl: string, token: string): Promise<void> {
 function normalizeBaseUrl(value: string): string {
   const withScheme = /^https?:\/\//i.test(value) ? value : `http://${value}`;
   return withScheme.replace(/\/+$/, '');
+}
+
+function parseDurationOption(value?: string): number {
+  const minutes = Number(value ?? '30');
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+    throw new Error(`Invalid --request-duration "${value}". Use whole minutes between 1 and 1440.`);
+  }
+  return minutes;
 }
 
 async function readJson(response: Response): Promise<any> {

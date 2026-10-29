@@ -21,6 +21,12 @@ uomp audit
 uomp disconnect claude
 uomp stop
 uomp revoke <session-id>
+
+# 按需授权（实验）
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects --on-demand
+uomp pending
+uomp approve <request-id>
+uomp deny <request-id>
 ```
 
 手动 fallback（不支持的客户端）：
@@ -227,6 +233,9 @@ portfolio:holdings（8 条记录）
 | `uomp start` | 后台启动 UOMP 服务 |
 | `uomp stop` | 停止后台 UOMP 服务 |
 | `uomp disconnect <client>` | 移除客户端配置并撤销对应会话 |
+| `uomp pending` | 查看待审批的按需授权请求 |
+| `uomp approve <request-id>` | 审批请求并写入会话 token |
+| `uomp deny <request-id>` | 拒绝请求并关闭会话 |
 | `uomp sessions` | 查看活跃会话 |
 | `uomp revoke <session-id>` | 撤销会话 |
 | `uomp audit` | 查看访问审计日志 |

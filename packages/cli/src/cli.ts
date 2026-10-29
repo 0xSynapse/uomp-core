@@ -18,6 +18,9 @@ import { McpCommands } from './commands/mcp.js';
 import { DemoCommands } from './commands/demo.js';
 import { DoctorCommands } from './commands/doctor.js';
 import { DisconnectCommands } from './commands/disconnect.js';
+import { PendingCommands } from './commands/pending.js';
+import { ApproveCommands } from './commands/approve.js';
+import { DenyCommands } from './commands/deny.js';
 import { StatusCommands } from './commands/status.js';
 import { StopCommands } from './commands/stop.js';
 import { StartCommands } from './commands/start.js';
@@ -132,6 +135,9 @@ program.addCommand(McpCommands.get());
 program.addCommand(StatusCommands.get());
 program.addCommand(StopCommands.get());
 program.addCommand(DisconnectCommands.get());
+program.addCommand(PendingCommands.get());
+program.addCommand(ApproveCommands.get());
+program.addCommand(DenyCommands.get());
 
 program
   .command('sessions')
@@ -226,6 +232,11 @@ Manage the server without a client:
   $ uomp start
   $ uomp status
   $ uomp stop
+
+On-demand consent (MCP clients):
+  $ uomp pending
+  $ uomp approve <request-id>
+  $ uomp deny <request-id>
 
 Connect an agent package:
   $ uomp connect ./my-agent --scope notes/projects

@@ -156,6 +156,10 @@ function printClients(clients: ClientConfigStatus[]): void {
     }
 
     if (client.sessionPath && !existsSync(expandSessionPath(client.sessionPath))) {
+      if (client.onDemand) {
+        console.log(`  ${label} ${chalk.green('configured')}  on-demand, no active session`);
+        continue;
+      }
       console.log(`  ${label} ${chalk.yellow('configured')}  env missing: ${client.sessionPath}`);
       continue;
     }

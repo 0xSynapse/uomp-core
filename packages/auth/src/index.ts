@@ -28,6 +28,34 @@ export interface AuthServiceOptions {
   adminToken: string;
 }
 
+export type ConsentRequestStatus = 'pending' | 'approved' | 'denied' | 'expired';
+
+export interface ConsentRequest {
+  requestId: string;
+  sessionId: string;
+  client?: string;
+  agentId: string;
+  agentName?: string;
+  requestedScopes: Scopes;
+  envPath?: string;
+  baseUrl?: string;
+  status: ConsentRequestStatus;
+  createdAt: string;
+  expiresAt: string;
+  approvedAt?: string;
+  grantedScopes?: Scopes;
+}
+
+export interface CreateConsentRequestInput {
+  client?: string;
+  agent_id: string;
+  agent_name?: string;
+  requested_scopes: Scopes;
+  duration_minutes?: number;
+  env_path?: string;
+  base_url?: string;
+}
+
 const scopeActionSchema = z.object({
   tags: z.array(z.string()).default([]),
   keys: z.array(z.string()).default([]),
@@ -57,6 +85,16 @@ const grantSessionSchema = z.object({
   allowed_fields: z.array(z.string()).optional(),
   aggregation_only: z.boolean().optional(),
   task_bound: z.boolean().optional(),
+});
+
+const consentRequestSchema = z.object({
+  client: z.string().optional(),
+  agent_id: z.string(),
+  agent_name: z.string().optional(),
+  requested_scopes: scopesSchema,
+  duration_minutes: z.number().min(1).max(1440).default(30),
+  env_path: z.string().optional(),
+  base_url: z.string().optional(),
 });
 
 const deletionProofSchema = z.object({
@@ -121,6 +159,40 @@ export function validateGrantedFields(requested: Scopes, granted?: string[]): st
   return null;
 }
 
+export function validateConsentGrant(requested: Scopes, granted: Scopes): string | null {
+  const errors: string[] = [];
+
+  for (const action of ['read', 'write'] as const) {
+    const requestedAction = requested[action];
+    const grantedAction = granted[action];
+    if (!requestedAction || !grantedAction) {
+      errors.push(`${action}: scope is missing`);
+      continue;
+    }
+
+    const extraTags = grantedAction.tags.filter(tag => !requestedAction.tags.includes(tag));
+    if (extraTags.length > 0) {
+      errors.push(`${action}.tags exceeds requested scope: ${extraTags.join(', ')}`);
+    }
+
+    for (const field of ['denyTags', 'denyKeys'] as const) {
+      const removed = requestedAction[field].filter(value => !grantedAction[field].includes(value));
+      if (removed.length > 0) {
+        errors.push(`${action}.${field} removes requested denial: ${removed.join(', ')}`);
+      }
+    }
+
+    if (action === 'write') {
+      const extraKeys = grantedAction.keys.filter(key => !requestedAction.keys.includes(key));
+      if (extraKeys.length > 0) {
+        errors.push(`${action}.keys exceeds requested scope: ${extraKeys.join(', ')}`);
+      }
+    }
+  }
+
+  return errors.length > 0 ? errors.join('; ') : null;
+}
+
 export class AuthService {
   private db: Database.Database;
   private issuer: JWTTokenIssuer;
@@ -156,6 +228,22 @@ export class AuthService {
         token_hash TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,
         expires_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS consent_requests (
+        request_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        client TEXT,
+        agent_id TEXT NOT NULL,
+        agent_name TEXT,
+        requested_scopes TEXT NOT NULL,
+        env_path TEXT,
+        base_url TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        approved_at TEXT,
+        granted_scopes TEXT
       );
     `);
   }
@@ -314,6 +402,89 @@ export class AuthService {
       return c.json({ status: 'accepted', deletion_proof_id: proof.deletion_proof_id });
     });
 
+    app.post('/v1/consent/requests', async c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+
+      const body = await c.req.json();
+      const parsed = consentRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json({ error: { code: 'INVALID_REQUEST', message: parsed.error.message } }, 400);
+      }
+
+      const request = this.createConsentRequest(parsed.data);
+      return c.json({
+        request_id: request.requestId,
+        session_id: request.sessionId,
+        status: request.status,
+        client: request.client,
+        agent_id: request.agentId,
+        requested_scopes: request.requestedScopes,
+        expires_at: request.expiresAt,
+      });
+    });
+
+    app.get('/v1/consent/requests', c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+
+      const status = c.req.query('status') as ConsentRequestStatus | undefined;
+      return c.json(this.listConsentRequests(status));
+    });
+
+    app.get('/v1/consent/requests/:id', c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+
+      const request = this.getConsentRequest(c.req.param('id'));
+      if (!request) {
+        return c.json({ error: { code: 'REQUEST_NOT_FOUND', message: 'Consent request not found' } }, 404);
+      }
+      return c.json(request);
+    });
+
+    app.post('/v1/consent/requests/:id/approve', async c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+
+      const body = await c.req.json();
+      const parsed = grantSessionSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json({ error: { code: 'INVALID_REQUEST', message: parsed.error.message } }, 400);
+      }
+
+      try {
+        const result = await this.approveConsentRequest(c.req.param('id'), parsed.data.granted_scopes);
+        if (!result) {
+          return c.json({ error: { code: 'REQUEST_NOT_FOUND', message: 'Consent request not found or not pending' } }, 404);
+        }
+        return c.json({
+          token: result.token,
+          token_type: 'Bearer',
+          session_id: result.sessionId,
+          expires_at: result.expiresAt,
+        });
+      } catch (error) {
+        return c.json({
+          error: {
+            code: 'SCOPE_EXCEEDS_REQUEST',
+            message: error instanceof Error ? error.message : String(error),
+          },
+        }, 400);
+      }
+    });
+
+    app.post('/v1/consent/requests/:id/deny', c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+
+      const request = this.denyConsentRequest(c.req.param('id'));
+      if (!request) {
+        return c.json({ error: { code: 'REQUEST_NOT_FOUND', message: 'Consent request not found or not pending' } }, 404);
+      }
+      return c.json({ request_id: request.requestId, status: request.status });
+    });
+
     return app;
   }
 
@@ -349,6 +520,130 @@ export class AuthService {
     );
 
     return session;
+  }
+
+  createConsentRequest(data: CreateConsentRequestInput): ConsentRequest {
+    const session = this.createSession({
+      agent_id: data.agent_id,
+      ...(data.agent_name ? { agent_name: data.agent_name } : {}),
+      requested_scopes: data.requested_scopes,
+      duration_minutes: data.duration_minutes ?? this.defaultDurationMinutes,
+    });
+
+    const requestId = generateId('consent');
+    const createdAt = new Date().toISOString();
+
+    this.db.prepare(`
+      INSERT INTO consent_requests (
+        request_id, session_id, client, agent_id, agent_name, requested_scopes,
+        env_path, base_url, status, created_at, expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+    `).run(
+      requestId,
+      session.sessionId,
+      data.client ?? null,
+      data.agent_id,
+      data.agent_name ?? null,
+      JSON.stringify(data.requested_scopes),
+      data.env_path ?? null,
+      data.base_url ?? null,
+      createdAt,
+      session.expiresAt
+    );
+
+    return {
+      requestId,
+      sessionId: session.sessionId,
+      ...(data.client ? { client: data.client } : {}),
+      agentId: data.agent_id,
+      ...(data.agent_name ? { agentName: data.agent_name } : {}),
+      requestedScopes: data.requested_scopes,
+      ...(data.env_path ? { envPath: data.env_path } : {}),
+      ...(data.base_url ? { baseUrl: data.base_url } : {}),
+      status: 'pending',
+      createdAt,
+      expiresAt: session.expiresAt,
+    };
+  }
+
+  getConsentRequest(requestId: string): ConsentRequest | null {
+    const row = this.db.prepare('SELECT * FROM consent_requests WHERE request_id = ?')
+      .get(requestId) as Record<string, string> | undefined;
+    if (!row) return null;
+
+    if (row.status === 'pending' && Date.parse(row.expires_at) <= Date.now()) {
+      this.db.prepare("UPDATE consent_requests SET status = 'expired' WHERE request_id = ? AND status = 'pending'")
+        .run(requestId);
+      this.closeSession(row.session_id);
+      return this.deserializeConsentRequest({ ...row, status: 'expired' });
+    }
+
+    return this.deserializeConsentRequest(row);
+  }
+
+  listConsentRequests(status: ConsentRequestStatus = 'pending'): ConsentRequest[] {
+    const rows = this.db.prepare('SELECT * FROM consent_requests WHERE status = ? ORDER BY created_at DESC')
+      .all(status) as Record<string, string>[];
+    const requests = rows.map(row => this.deserializeConsentRequest(row));
+
+    if (status === 'pending') {
+      for (const request of requests) {
+        if (Date.parse(request.expiresAt) <= Date.now()) {
+          this.db.prepare("UPDATE consent_requests SET status = 'expired' WHERE request_id = ? AND status = 'pending'")
+            .run(request.requestId);
+          this.closeSession(request.sessionId);
+          request.status = 'expired';
+        }
+      }
+      return requests.filter(request => request.status === 'pending');
+    }
+
+    return requests;
+  }
+
+  async approveConsentRequest(
+    requestId: string,
+    grantedScopes: Scopes
+  ): Promise<{ token: string; expiresAt: string; sessionId: string } | null> {
+    const request = this.getConsentRequest(requestId);
+    if (!request || request.status !== 'pending') {
+      return null;
+    }
+
+    const scopeError = validateConsentGrant(request.requestedScopes, grantedScopes);
+    if (scopeError) {
+      throw new Error(scopeError);
+    }
+
+    const result = await this.grantSession(request.sessionId, grantedScopes);
+    if (!result) {
+      return null;
+    }
+
+    this.db.prepare(`
+      UPDATE consent_requests
+      SET status = 'approved', approved_at = ?, granted_scopes = ?
+      WHERE request_id = ? AND status = 'pending'
+    `).run(new Date().toISOString(), JSON.stringify(grantedScopes), requestId);
+
+    return {
+      token: result.token,
+      expiresAt: result.expiresAt,
+      sessionId: request.sessionId,
+    };
+  }
+
+  denyConsentRequest(requestId: string): ConsentRequest | null {
+    const request = this.getConsentRequest(requestId);
+    if (!request || request.status !== 'pending') {
+      return null;
+    }
+
+    this.db.prepare("UPDATE consent_requests SET status = 'denied', approved_at = ? WHERE request_id = ? AND status = 'pending'")
+      .run(new Date().toISOString(), requestId);
+    this.closeSession(request.sessionId);
+
+    return { ...request, status: 'denied' };
   }
 
   async grantSession(
@@ -491,6 +786,24 @@ export class AuthService {
       requestedScopes: JSON.parse(row.requested_scopes) as Scopes,
       grantedScopes: row.granted_scopes ? (JSON.parse(row.granted_scopes) as Scopes) : undefined,
       tokenHash: row.token_hash,
+    };
+  }
+
+  private deserializeConsentRequest(row: Record<string, string>): ConsentRequest {
+    return {
+      requestId: row.request_id,
+      sessionId: row.session_id,
+      ...(row.client ? { client: row.client } : {}),
+      agentId: row.agent_id,
+      ...(row.agent_name ? { agentName: row.agent_name } : {}),
+      requestedScopes: JSON.parse(row.requested_scopes) as Scopes,
+      ...(row.env_path ? { envPath: row.env_path } : {}),
+      ...(row.base_url ? { baseUrl: row.base_url } : {}),
+      status: row.status as ConsentRequestStatus,
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+      ...(row.approved_at ? { approvedAt: row.approved_at } : {}),
+      ...(row.granted_scopes ? { grantedScopes: JSON.parse(row.granted_scopes) as Scopes } : {}),
     };
   }
 
