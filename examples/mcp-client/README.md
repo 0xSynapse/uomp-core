@@ -14,10 +14,10 @@ uomp authorize ./examples/mcp-client \
   --output ~/.uomp/mcp-client.env \
   --no-server
 
-uomp mcp --session ~/.uomp/mcp-client.env --print-config
+uomp mcp --session ~/.uomp/mcp-client.env --print-config --client claude
 ```
 
-Paste the generated JSON into the client's `mcpServers` config, then restart the client.
+Use `--client cursor` or `--client opencode` for those clients. Paste the generated JSON into the client's config, then restart the client.
 
 Tools:
 

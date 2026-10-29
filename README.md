@@ -269,10 +269,10 @@ uomp authorize ./examples/mcp-client \
   --output ~/.uomp/mcp-client.env \
   --no-server
 
-uomp mcp --session ~/.uomp/mcp-client.env --print-config
+uomp mcp --session ~/.uomp/mcp-client.env --print-config --client claude
 ```
 
-Paste the output into your MCP client config. It looks like:
+Use `--client cursor` or `--client opencode` for those clients. Without `--client`, the output is the generic `mcpServers` shape. Paste the output into your MCP client config. It looks like:
 
 ```json
 {
@@ -601,10 +601,10 @@ uomp authorize ./examples/mcp-client \
   --output ~/.uomp/mcp-client.env \
   --no-server
 
-uomp mcp --session ~/.uomp/mcp-client.env --print-config
+uomp mcp --session ~/.uomp/mcp-client.env --print-config --client claude
 ```
 
-把输出粘贴到 MCP 客户端配置里。它看起来像：
+用 `--client cursor` 或 `--client opencode` 可生成对应客户端配置；不传时输出通用 `mcpServers` 结构。把输出粘贴到 MCP 客户端配置里。它看起来像：
 
 ```json
 {
