@@ -9,6 +9,7 @@ export const DEFAULT_HOST = '127.0.0.1';
 export const DATA_DIR_NAME = '.uomp';
 export const AGENTS_DIR_NAME = 'agents';
 export const SECRETS_DIR_NAME = '.secrets';
+export const SESSIONS_DIR_NAME = 'sessions';
 export const MEMORY_DB_NAME = 'memory.db';
 export const AUDIT_DB_NAME = 'audit.db';
 export const AUTH_DB_NAME = 'auth.db';

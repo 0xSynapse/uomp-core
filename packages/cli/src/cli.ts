@@ -12,12 +12,14 @@ import { DiscoverCommands } from './commands/discover.js';
 import { ConnectCommands } from './commands/connect.js';
 import { ImportCommands } from './commands/import.js';
 import { GatewayCommands } from './commands/gateway.js';
+import { ServeCommands } from './commands/serve.js';
+import { parseHost, parsePort } from './utils/server.js';
 
 const program = new Command();
 
 program
   .name('uomp')
-  .description('User-Owned Memory Protocol CLI')
+  .description('Give agents temporary, revocable access to your local notes and memory')
   .version('0.0.1');
 
 program
@@ -30,7 +32,7 @@ program
   });
 
 program
-  .command('memory')
+  .command('memory', { hidden: true })
   .description('Manage memory items')
   .addCommand(MemoryCommands.add())
   .addCommand(MemoryCommands.list())
@@ -42,7 +44,7 @@ program
 program.addCommand(ImportCommands.get());
 
 program
-  .command('registry')
+  .command('registry', { hidden: true })
   .description('Agent registry operations')
   .addCommand(RegistryCommands.search())
   .addCommand(RegistryCommands.list())
@@ -51,7 +53,7 @@ program
   .addCommand(RegistryCommands.install());
 
 program
-  .command('discover <agent>')
+  .command('discover <agent>', { hidden: true })
   .description('Discover an agent from a local path or registry://<id>')
   .action(async (agent: string) => {
     const config = new UompConfig();
@@ -61,7 +63,7 @@ program
   });
 
 program
-  .command('connect <agent>')
+  .command('connect <agent>', { hidden: true })
   .description('Connect to an agent: verify identity, checksum, and cache manifest')
   .action(async (agent: string) => {
     const config = new UompConfig();
@@ -72,17 +74,37 @@ program
 
 program
   .command('authorize <agent>')
-  .description('Authorize an agent and output the capability token')
-  .option('-s, --scope <scopes...>', 'Additional read scopes (tags)')
-  .option('-o, --output <file>', 'Save token environment variables to file')
-  .option('-d, --duration <minutes>', 'Session duration in minutes', '30')
+  .description('Authorize an agent and create a session')
+  .option('-s, --scope <scopes...>', 'Read tags to grant (skips the interactive prompt)')
+  .option('-o, --output <file>', 'Write the session env file to a custom path')
+  .option('-d, --duration <minutes>', 'Session duration in minutes (1-1440)', '30')
+  .option('-p, --port <port>', 'Local server port (default: 9374)')
+  .option('--host <host>', 'Local server host (default: 127.0.0.1)')
+  .option('--print-token', 'Print the capability token (it is also written to the env file)')
   .option('--no-server', 'Do not start the local Auth + Guard server')
-  .action(async (agent: string, options: { scope?: string[]; output?: string; duration?: string; server?: boolean }) => {
-    const config = new UompConfig();
-    await config.init();
-    const authorizer = new AuthorizeCommands(config);
-    await authorizer.authorize(agent, options);
+  .action(async (agent: string, options: {
+    scope?: string[];
+    output?: string;
+    duration?: string;
+    port?: string;
+    host?: string;
+    printToken?: boolean;
+    server?: boolean;
+  }) => {
+    try {
+      const config = new UompConfig({
+        port: options.port ? parsePort(options.port) : undefined,
+        host: options.host ? parseHost(options.host) : undefined,
+      });
+      const authorizer = new AuthorizeCommands(config);
+      await authorizer.authorize(agent, options);
+    } catch (error) {
+      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
+      process.exitCode = 1;
+    }
   });
+
+program.addCommand(ServeCommands.get());
 
 program
   .command('sessions')
@@ -96,7 +118,7 @@ program
 
 program
   .command('revoke <sessionId>')
-  .description('Revoke a session')
+  .description('Revoke a session and invalidate its token')
   .action(async (sessionId: string) => {
     const cmd = SessionsCommands.revoke();
     await cmd.parseAsync(['node', 'uomp', sessionId]);
@@ -104,7 +126,7 @@ program
 
 program
   .command('audit')
-  .description('View audit logs')
+  .description('Show what agents read or attempted to read')
   .option('-s, --session <sessionId>', 'Filter by session ID')
   .option('-a, --agent <agentId>', 'Filter by agent ID')
   .option('-l, --limit <number>', 'Limit number of results', '50')
@@ -120,7 +142,7 @@ program
   });
 
 program
-  .command('agent')
+  .command('agent', { hidden: true })
   .description('Agent developer commands')
   .addCommand(new Command('run')
     .description('Run an agent as a child process (developer shortcut)')
@@ -134,9 +156,20 @@ program
     }));
 
 program
-  .command('gateway')
+  .command('gateway', { hidden: true })
   .description('Gateway management')
   .addCommand(GatewayCommands.start())
   .addCommand(GatewayCommands.status());
+
+program.addHelpText('after', `
+Core flow:
+  $ uomp init
+  $ uomp import ~/Obsidian/MyVault
+  $ uomp authorize ./my-agent --scope notes/projects
+  $ uomp sessions
+
+Advanced commands (hidden): memory, registry, discover, connect, agent, gateway
+Run \`uomp help <command>\` for details.
+`);
 
 program.parse();
