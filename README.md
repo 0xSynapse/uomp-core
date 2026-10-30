@@ -111,7 +111,7 @@ Design principles:
 
 ### Aegis OS integration (optional)
 
-UOMP can delegate memory policy evaluation to Aegis OS. When configured, the Auth Service calls Aegis `memory_policy_evaluate`; an `ask` becomes a UOMP consent request, and approval calls `policy_approve_escalation` before the UOMP token is issued.
+UOMP can delegate memory policy evaluation to Aegis OS. When configured, the Auth Service calls Aegis `memory_policy_evaluate`; an `ask` becomes a UOMP consent request. Approval and denial go through Aegis's trusted `/v1/approvals/decide` endpoint before the UOMP token is issued or the session is closed.
 
 ```bash
 export UOMP_AEGIS_MCP_URL=http://127.0.0.1:7080/mcp
@@ -468,7 +468,7 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 
 ### Aegis OS 集成（可选）
 
-UOMP 可以把记忆策略评估委托给 Aegis OS。配置后，Auth Service 会调用 Aegis 的 `memory_policy_evaluate`；返回 `ask` 时创建 UOMP 审批请求，批准时先调用 `policy_approve_escalation`，再签发 UOMP token。
+UOMP 可以把记忆策略评估委托给 Aegis OS。配置后，Auth Service 会调用 Aegis 的 `memory_policy_evaluate`；返回 `ask` 时创建 UOMP 审批请求。批准和拒绝都通过 Aegis 的可信 `/v1/approvals/decide` 端点完成，再签发 UOMP token 或关闭会话。
 
 ```bash
 export UOMP_AEGIS_MCP_URL=http://127.0.0.1:7080/mcp

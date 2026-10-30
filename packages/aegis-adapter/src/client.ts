@@ -12,6 +12,8 @@ export interface HttpAegisMcpClientOptions {
   token: string;
   orgId: string;
   agentId: string;
+  /** Defaults to the MCP endpoint with `/mcp` replaced by `/v1/approvals/decide`. */
+  approvalEndpoint?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -23,6 +25,7 @@ export interface HttpAegisMcpClientOptions {
  */
 export class HttpAegisMcpClient implements AegisPolicyClient {
   private readonly endpoint: string;
+  private readonly approvalEndpoint: string;
   private readonly token: string;
   private readonly orgId: string;
   private readonly agentId: string;
@@ -31,6 +34,8 @@ export class HttpAegisMcpClient implements AegisPolicyClient {
 
   constructor(options: HttpAegisMcpClientOptions) {
     this.endpoint = options.endpoint;
+    this.approvalEndpoint = options.approvalEndpoint
+      ?? options.endpoint.replace(/\/mcp$/, '/v1/approvals/decide');
     this.token = options.token;
     this.orgId = options.orgId;
     this.agentId = options.agentId;
@@ -43,11 +48,36 @@ export class HttpAegisMcpClient implements AegisPolicyClient {
   }
 
   async approveEscalation(escalationId: string, ttlSecs: number): Promise<AegisLease> {
-    const result = await this.callTool('policy_approve_escalation', {
-      escalation_id: escalationId,
-      ttl_secs: ttlSecs,
+    const result = await this.decideEscalation(escalationId, 'approve', ttlSecs);
+    return parseLease(result.lease);
+  }
+
+  async denyEscalation(escalationId: string): Promise<void> {
+    await this.decideEscalation(escalationId, 'deny', 0);
+  }
+
+  private async decideEscalation(
+    escalationId: string,
+    decision: 'approve' | 'deny',
+    ttlSecs: number,
+  ): Promise<{ status?: string; lease?: unknown; escalation?: unknown }> {
+    const response = await this.fetchImpl(this.approvalEndpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${this.token}`,
+      },
+      body: JSON.stringify({
+        escalation_id: escalationId,
+        decision,
+        ttl_secs: ttlSecs,
+      }),
     });
-    return parseLease(result);
+
+    if (!response.ok) {
+      throw new Error(`Aegis approval request failed (${response.status}): ${await response.text()}`);
+    }
+    return await response.json() as { status?: string; lease?: unknown; escalation?: unknown };
   }
 
   private async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {

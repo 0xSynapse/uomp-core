@@ -41,4 +41,14 @@ export class AegisConsentBridge {
     }
     return leases;
   }
+
+  /**
+   * Trusted denial surface. Closes the matching Aegis escalations without
+   * issuing a lease.
+   */
+  async denyEscalations(escalationIds: string[]): Promise<void> {
+    for (const escalationId of escalationIds) {
+      await this.client.denyEscalation(escalationId);
+    }
+  }
 }

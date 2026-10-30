@@ -127,27 +127,33 @@ test('HTTP client sends Aegis MCP requests and parses decisions', async () => {
   assert.equal(requests[0].headers['x-aegis-org'], 'local');
 });
 
-test('HTTP client parses leases and surfaces tool errors', async () => {
-  let mode = 'lease';
-  const fetchImpl = async (_url, init) => {
+test('HTTP client approves and denies through the trusted approval endpoint', async () => {
+  let mode = 'approve';
+  const requests = [];
+  const fetchImpl = async (url, init) => {
     const body = JSON.parse(init.body);
-    const text = mode === 'lease'
-      ? JSON.stringify({
-          lease_id: 'lease-1',
-          org_id: 'local',
-          agent_id: 'claude-desktop',
-          action_pattern: 'memory.read',
-          resource_pattern: 'memory:tag:notes/projects',
-          expires_at_ms: 1_800_000,
-          granted_by: 'user',
-        })
-      : 'Aegis OS Syscall Error: nope';
+    requests.push({ url, body });
+    if (String(url).endsWith('/v1/approvals/decide')) {
+      return new Response(JSON.stringify(mode === 'approve'
+        ? {
+            status: 'approved',
+            lease: {
+              lease_id: 'lease-1',
+              org_id: 'local',
+              agent_id: 'claude-desktop',
+              action_pattern: 'memory.read',
+              resource_pattern: 'memory:tag:notes/projects',
+              expires_at_ms: 1_800_000,
+              granted_by: 'user',
+            },
+          }
+        : { status: 'denied', escalation: { escalation_id: 'esc-42' } }
+      ), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
     return new Response(JSON.stringify({
       jsonrpc: '2.0',
       id: body.id,
-      result: mode === 'lease'
-        ? { content: [{ type: 'text', text }] }
-        : { isError: true, content: [{ type: 'text', text }] },
+      result: { isError: true, content: [{ type: 'text', text: 'Aegis OS Syscall Error: nope' }] },
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
 
@@ -161,8 +167,21 @@ test('HTTP client parses leases and surfaces tool errors', async () => {
 
   const lease = await client.approveEscalation('esc-42', 1800);
   assert.equal(lease.resource_pattern, 'memory:tag:notes/projects');
+  assert.equal(requests[0].url, 'http://127.0.0.1:7080/v1/approvals/decide');
+  assert.deepEqual(requests[0].body, {
+    escalation_id: 'esc-42',
+    decision: 'approve',
+    ttl_secs: 1800,
+  });
 
-  mode = 'error';
+  mode = 'deny';
+  await client.denyEscalation('esc-42');
+  assert.deepEqual(requests[1].body, {
+    escalation_id: 'esc-42',
+    decision: 'deny',
+    ttl_secs: 0,
+  });
+
   await assert.rejects(
     () => client.evaluate('read', 'memory:tag:notes/projects'),
     /Aegis OS Syscall Error/,

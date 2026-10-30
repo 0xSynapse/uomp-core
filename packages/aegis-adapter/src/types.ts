@@ -44,4 +44,5 @@ export interface AegisScopeDecision {
 export interface AegisPolicyClient {
   evaluate(action: MemoryAction, resource: string): Promise<AegisMemoryDecision>;
   approveEscalation(escalationId: string, ttlSecs: number): Promise<AegisLease>;
+  denyEscalation(escalationId: string): Promise<void>;
 }

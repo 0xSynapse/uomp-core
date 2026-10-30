@@ -116,3 +116,29 @@ test('approving a UOMP request approves the matching Aegis escalations', async t
   assert.ok(approvals[0].ttlSecs > 0);
   assert.equal(auth.getConsentRequest(request.requestId)?.status, 'approved');
 });
+
+test('denying a UOMP request denies the matching Aegis escalations', async t => {
+  const denials = [];
+  const auth = await createHarness(t, {
+    async evaluateScopes() {
+      return { decision: 'ask', escalationIds: ['esc-1'] };
+    },
+    async approveEscalations() {
+      throw new Error('not used');
+    },
+    async denyEscalations(escalationIds) {
+      denials.push(escalationIds);
+    },
+  });
+
+  const { request } = await auth.createConsentRequestWithAegis({
+    agent_id: 'claude-desktop',
+    requested_scopes: scopesForTags(['notes/projects']),
+  });
+
+  const denied = await auth.denyConsentRequest(request.requestId);
+
+  assert.equal(denied?.status, 'denied');
+  assert.deepEqual(denials, [['esc-1']]);
+  assert.equal(auth.getConsentRequest(request.requestId)?.status, 'denied');
+});

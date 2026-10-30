@@ -68,6 +68,7 @@ export interface AegisConsentEvaluator {
     escalationIds: string[];
   }>;
   approveEscalations(escalationIds: string[], ttlSecs: number): Promise<unknown[]>;
+  denyEscalations?(escalationIds: string[]): Promise<void>;
 }
 
 export interface CreateConsentRequestInput {
@@ -571,11 +572,11 @@ export class AuthService {
       }
     });
 
-    app.post('/v1/consent/requests/:id/deny', c => {
+    app.post('/v1/consent/requests/:id/deny', async c => {
       const unauthorized = this.requireAdmin(c);
       if (unauthorized) return unauthorized;
 
-      const request = this.denyConsentRequest(c.req.param('id'));
+      const request = await this.denyConsentRequest(c.req.param('id'));
       if (!request) {
         return c.json({ error: { code: 'REQUEST_NOT_FOUND', message: 'Consent request not found or not pending' } }, 404);
       }
@@ -621,7 +622,7 @@ export class AuthService {
 
       const action = typeof body.action === 'string' ? body.action : '';
       if (action === 'deny') {
-        this.denyConsentRequest(requestId);
+        await this.denyConsentRequest(requestId);
         return c.html(renderMessagePage('Access denied', 'The agent will not receive a token.'));
       }
       if (action !== 'approve') {
@@ -978,18 +979,20 @@ export class AuthService {
     };
   }
 
-  denyConsentRequest(requestId: string): ConsentRequest | null {
+  async denyConsentRequest(requestId: string): Promise<ConsentRequest | null> {
     const request = this.getConsentRequest(requestId);
     if (!request || request.status !== 'pending') {
       return null;
+    }
+
+    if (request.aegisEscalationIds?.length && this.aegis?.denyEscalations) {
+      await this.aegis.denyEscalations(request.aegisEscalationIds);
     }
 
     this.db.prepare("UPDATE consent_requests SET status = 'denied', approved_at = ? WHERE request_id = ? AND status = 'pending'")
       .run(new Date().toISOString(), requestId);
     this.closeSession(request.sessionId);
 
-    // Aegis escalations are left to expire; a future policy_deny_escalation
-    // tool will close them explicitly without granting a lease.
     return { ...request, status: 'denied' };
   }
 

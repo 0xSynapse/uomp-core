@@ -14,7 +14,7 @@ export class DenyCommands {
           await config.init();
           const auth = await openAuthService(config);
           try {
-            const request = auth.denyConsentRequest(requestId);
+            const request = await auth.denyConsentRequest(requestId);
             if (!request) {
               console.log(chalk.red('Consent request not found or not pending'));
               process.exitCode = 1;
