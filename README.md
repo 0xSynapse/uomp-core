@@ -1,4 +1,9 @@
-# UOMP
+# UOMP Reference Implementation
+
+> **Migration notice (2026-10):** UOMP is becoming the native memory module of [Aegis OS](https://github.com/heurion-org/aegis-os). The product entry point is `aegis-os memory ...`; this repository remains the reference/legacy implementation during the native cutover. Native code lives in `crates/aos-memory`, `crates/aos-memory-store`, and `crates/aos-memory-gateway`.
+>
+> **迁移说明（2026-10）：** UOMP 正在成为 [Aegis OS](https://github.com/heurion-org/aegis-os) 的原生 memory module。产品入口是 `aegis-os memory ...`；本仓库在原生迁移完成前保留为参考/兼容实现。原生代码位于 `crates/aos-memory`、`crates/aos-memory-store` 和 `crates/aos-memory-gateway`。
+
 
 **The open memory consent protocol for AI agents.**
 
