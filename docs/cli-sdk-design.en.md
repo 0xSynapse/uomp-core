@@ -1,6 +1,6 @@
 # UOMP CLI/SDK Design Document
 
-> **Status: historical design note (pre-CLI-first).** The current path is agent-first: the user runs `uomp setup <client>` once, then the agent requests access when it needs data and UOMP opens the local consent page. `connect` is the advanced pre-authorize path; `authorize` and `mcp --print-config` are the manual/script fallback; `discover`, `inspect`, and `registry` are hidden advanced commands. See the [README](../README.md#quick-start) for current usage.
+> **Status: historical design note (pre-CLI-first).** The current path is agent-first: the user runs `uomp setup <client>` once, then the agent requests access when it needs data and UOMP opens the local consent page. `connect` is the advanced pre-authorize path; `authorize` and `mcp --print-config` are the manual/script fallback; `discover`, `inspect`, and `registry` are hidden advanced commands. The remote Gateway / Cloud Relay is retired; remote Agents use Aegis Cloud + Aegis Memory Gateway. See the [README](../README.md#quick-start) for current usage.
 >
 > The original analysis below is kept as historical context for the stock-analyst scenario.
 
@@ -244,8 +244,8 @@ portfolio:holdings (8 records)
 | `uomp config` | Configure default preferences |
 | `uomp dry-run <agent>` | Simulate authorization without reading real data |
 | `uomp registry search <keyword>` | Search for Agents from the Registry |
-| `uomp gateway start` | Start Gateway with Cloudflare Tunnel auto-expose |
-| `uomp gateway status` | Check Gateway status |
+
+> `uomp gateway` is retired; remote Agents use Aegis Cloud + Aegis Memory Gateway.
 
 #### Agent Developer Commands
 

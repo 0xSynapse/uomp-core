@@ -72,7 +72,7 @@ test('help shows the core flow and hides advanced commands', () => {
       assert.match(result.stdout, new RegExp(`^\\s{2}${command}(?:\\s|$)`, 'm'));
     }
 
-    for (const command of ['memory', 'registry', 'discover', 'inspect', 'agent', 'gateway']) {
+    for (const command of ['memory', 'registry', 'discover', 'inspect', 'agent']) {
       assert.doesNotMatch(result.stdout, new RegExp(`^\\s{2}${command}(?:\\s|$)`, 'm'));
     }
 

@@ -12,7 +12,6 @@ import { DiscoverCommands } from './commands/discover.js';
 import { ConnectCommands } from './commands/connect.js';
 import { InspectCommands } from './commands/inspect.js';
 import { ImportCommands } from './commands/import.js';
-import { GatewayCommands } from './commands/gateway.js';
 import { ServeCommands } from './commands/serve.js';
 import { McpCommands } from './commands/mcp.js';
 import { DemoCommands } from './commands/demo.js';
@@ -219,12 +218,6 @@ program
       await runner.run(agent, options.scope ?? []);
     }));
 
-program
-  .command('gateway', { hidden: true })
-  .description('Gateway management')
-  .addCommand(GatewayCommands.start())
-  .addCommand(GatewayCommands.status());
-
 program.addHelpText('after', `
 Fast path:
   $ uomp setup claude --vault ~/Obsidian/MyVault
@@ -254,7 +247,7 @@ Optional:
   $ uomp init
   $ uomp doctor
 
-Advanced commands (hidden): memory, registry, discover, inspect, agent, gateway
+Advanced commands (hidden): memory, registry, discover, inspect, agent
 Run \`uomp help <command>\` for details.
 `);
 

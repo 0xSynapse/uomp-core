@@ -1,6 +1,6 @@
 # UOMP CLI/SDK 设计文档
 
-> **状态：历史设计文档（CLI-first 之前）。** 当前 CLI 主路径是让 Agent 客户端做入口：用户只运行一次 `uomp setup <client>`，之后由 Agent 在需要时发起请求，UOMP 打开本地审批页。`connect` 是高级预授权入口，`authorize` 和 `mcp --print-config` 是手动/脚本 fallback；`discover`、`inspect`、`registry` 默认隐藏。当前用法见 [README](../README.md#quick-start)。
+> **状态：历史设计文档（CLI-first 之前）。** 当前 CLI 主路径是让 Agent 客户端做入口：用户只运行一次 `uomp setup <client>`，之后由 Agent 在需要时发起请求，UOMP 打开本地审批页。`connect` 是高级预授权入口，`authorize` 和 `mcp --print-config` 是手动/脚本 fallback；`discover`、`inspect`、`registry` 默认隐藏。远程 Gateway / Cloud Relay 已退役；远程 Agent 使用 Aegis Cloud + Aegis Memory Gateway。当前用法见 [README](../README.md#quick-start)。
 >
 > 下面保留原始设计分析，作为股票分析 Agent 场景的历史参考。
 
@@ -244,8 +244,8 @@ portfolio:holdings（8 条记录）
 | `uomp config` | 配置默认偏好 |
 | `uomp dry-run <agent>` | 模拟授权，不读真实数据 |
 | `uomp registry search <keyword>` | 从 Registry 搜索 Agent |
-| `uomp gateway start` | 启动 Gateway（含 Cloudflare Tunnel 自动公网暴露） |
-| `uomp gateway status` | 查看 Gateway 运行状态 |
+
+> `uomp gateway` 已退役；远程 Agent 使用 Aegis Cloud + Aegis Memory Gateway。
 
 #### Agent Developer 命令
 

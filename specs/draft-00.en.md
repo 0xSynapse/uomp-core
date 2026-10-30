@@ -13,6 +13,7 @@
 | 2026-07-12 | Draft-00 initial release. |
 | 2026-07-23 | Added Cloud Relay (§15.7), Store abstraction (§0), Payload API (§15.6). Updated `uom.json` schema (§6.2-6.4) with `fields`, `purposes`, `external_data_sources`, `package`. Updated the architecture diagram to include Gateway and Relay. Added FHE to Future Work (§22). Marked on-chain audit as Phase 4. |
 | 2026-10-29 | Local-first reference implementation: CLI + stdio MCP path, 0600 session env delivery, Auth + Guard combined service. Reworked §5 architecture and diagrams; Remote remains optional/preview. |
+| 2026-10-30 | Remote Agent Profile aligned with Aegis OS: remote Agent runs on Aegis Cloud, local entry is Aegis Memory Gateway. Standalone UOMP Cloud Relay retired. |
 
 ---
 
@@ -24,7 +25,7 @@ The User-Owned Memory Protocol (UOMP) defines a user-sovereign authorization pro
 
 This document is the UOMP protocol draft (Draft-00). It describes the protocol design intent, data formats, HTTP API, and security requirements. It is intended to evolve into a formal standard through public discussion. The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in [RFC 2119](https://datatracker.ietf.org/doc/html/rfc2119).
 
-> **Reference implementation status (2026-10):** the current `uomp` reference CLI implements the Local Profile first: the user runs `uomp setup` once to import notes, write the client config, and start the background server without pre-authorizing. The agent's first request for a tag/key opens the local consent page; the user approves and the call continues. `pending` / `approve` / `deny` are the terminal fallback; `connect` is the advanced pre-authorize path, and `authorize`, `serve`, and `mcp` are manual/script paths. The stdio MCP bridge is experimental. Remote Profile and Cloud Relay are optional/preview capabilities and are not required for conformance. Aegis OS is the reference runtime that enforces the protocol.
+> **Reference implementation status (2026-10):** the current `uomp` reference CLI implements the Local Profile first: the user runs `uomp setup` once to import notes, write the client config, and start the background server without pre-authorizing. The agent's first request for a tag/key opens the local consent page; the user approves and the call continues. `pending` / `approve` / `deny` are the terminal fallback; `connect` is the advanced pre-authorize path, and `authorize`, `serve`, and `mcp` are manual/script paths. The stdio MCP bridge is experimental. Remote Agent Profile is optional; the reference implementation uses Aegis Cloud + Aegis Memory Gateway. The standalone Cloud Relay is retired. Aegis OS is the reference runtime that enforces the protocol.
 
 ## 3. Introduction
 
@@ -67,7 +68,7 @@ UOMP's design goals are:
 | **MCP bridge** | Optional stdio adapter (`uomp mcp`) that translates MCP tool calls into Guard HTTP requests. |
 | **uom.json** | Agent manifest file describing the Agent's identity and default requested memory scope. |
 | **Local Profile** | Local deployment model where Memory Guard listens on `127.0.0.1`; default and current implementation. |
-| **Remote Profile** | Remote deployment model where an Agent reaches Guard through Gateway; optional/advanced. |
+| **Remote Agent Profile** | Remote Agent reaches local Guard through Aegis Memory Gateway; optional/advanced, data never leaves the user device. |
 
 ## 5. Protocol Overview
 
@@ -86,17 +87,16 @@ UOMP's complete architecture includes the following components:
 | **Memory Guard** | User's machine | Token validation, scope filtering, aggregate queries, audit logging. |
 | **CLI** | User's machine | User interaction: import, authorize, sessions, audit, revoke. |
 | **MCP bridge** | User's machine (optional) | stdio MCP adapter (`uomp mcp`): Claude Desktop / Cursor / OpenCode → HTTP Guard. Experimental. |
-| **Gateway** | User's machine (optional) | mTLS tunnel + token forwarding, exposing Guard to remote Agents. Supports Cloudflare Tunnel. |
-| **Cloud Relay** | Public network (design/preview) | Stateless public relay that validates Tokens with only the Guard public key and forwards requests. |
+| **Aegis Memory Gateway** | User's machine (optional) | mTLS/tunnel entry point that forwards validated remote Agent requests to local Guard; reference implementation provided by Aegis OS. |
 | **Agent** | Anywhere | Independent process carrying a Capability Token to read data via Guard or Gateway. |
 
 Three access paths:
 
 1. **Local (default)**: the CLI authorizes and writes the token to a `0600` session env file; the Agent accesses Guard directly at `127.0.0.1:9374`.
 2. **MCP (local adapter, experimental)**: the MCP client starts `uomp mcp` over stdio; the bridge reads the same session env file and calls Guard over HTTP + Token. The MCP bridge does not add a new trust boundary.
-3. **Remote (optional/advanced)**: the Agent accesses Guard through Gateway (mTLS + Tunnel).
+3. **Remote (optional/advanced)**: a remote Agent (reference: Aegis Cloud) reaches local Guard through Aegis Memory Gateway (mTLS + Tunnel); data stays local.
 
-The Local Profile and its MCP adapter are the current reference implementation path. Remote Profile is an optional extension and is not required for all implementations.
+The Local Profile and its MCP adapter are the current reference implementation path. Remote Agent Profile is an optional extension and is not required for all implementations.
 
 ### 5.2 Flow
 
@@ -119,9 +119,9 @@ UOMP defines two deployment profiles:
 | Profile | Default Port | Transport | Authentication | Storage | Status |
 |---------|--------------|-----------|----------------|---------|--------|
 | Local Profile | `127.0.0.1:9374` | HTTP | Capability Token | SQLite (local) | Default / current implementation |
-| Remote Profile | User-configured | HTTPS | Capability Token + mTLS | User-specified | Optional / advanced |
+| Remote Agent Profile | User-configured | HTTPS + mTLS | Capability Token + mTLS | Local (data never leaves the user device) | Optional / advanced; reference: Aegis |
 
-Local Profile is the default and RECOMMENDED configuration, and the reference implementation's primary path. Remote Profile MUST be explicitly enabled.
+Local Profile is the default and RECOMMENDED configuration, and the reference implementation's primary path. Remote Agent Profile MUST be explicitly enabled.
 
 The MCP bridge is not a separate profile; it is an optional stdio adapter over the Local Profile.
 
@@ -335,7 +335,7 @@ The UOMP Capability Token JWT payload uses the following custom claims (snake_ca
 | `scopes` | object | MUST | Read/write authorization scope. |
 | `limits` | object | OPTIONAL | Query count limits. Written but not enforced in MVP. |
 | `profile` | string | OPTIONAL | `local` or `remote`, default `local`. |
-| `audience` | string | OPTIONAL | Memory Guard endpoint bound to the Token. REQUIRED for Remote Profile. |
+| `audience` | string | OPTIONAL | Memory Guard endpoint bound to the Token. REQUIRED for Remote Agent Profile. |
 | `allowed_endpoints` | string[] | OPTIONAL | Network location whitelist for Token use. |
 | `allowed_fields` | string[] | OPTIONAL | Fields allowed to return per Memory Item. Memory Guard MUST filter results to include only these fields. |
 | `aggregation_only` | boolean | OPTIONAL | Default `false`. If `true`, only aggregation queries are permitted; returning individual Memory Item raw data is forbidden. |
@@ -352,7 +352,7 @@ Upon receiving a Token, the Auth Service and Memory Guard MUST perform the follo
 3. The Session bound to the Token has not been closed or revoked (in the MVP this is implemented via a blacklist table; production implementations SHOULD explicitly query Session status).
 4. Token is not in the blacklist.
 5. `profile` matches the current deployment profile.
-6. `audience` matches the current Memory Guard endpoint (REQUIRED for Remote Profile).
+6. `audience` matches the current Memory Guard endpoint (REQUIRED for Remote Agent Profile).
 
 If any validation fails, Memory Guard MUST reject the request and return an error.
 
@@ -361,7 +361,7 @@ If any validation fails, Memory Guard MUST reject the request and return an erro
 ### 8.1 Base URL
 
 - Local Profile: `http://127.0.0.1:9374`
-- Remote Profile: User-configured HTTPS URL
+- Remote Agent Profile: User-configured HTTPS URL
 
 ### 8.2 Versioning
 
@@ -892,52 +892,57 @@ uom-calendar-agent
 
 The user UI (e.g. CLI) runs on the same host as the Memory Store / Guard, performs identity verification and authorization, issues the Token, and only then hands the Token to the Agent. The Agent itself does not participate in authorization decisions. The MCP bridge reads the same env file and re-reads it before each tool call so re-authorization takes effect without a client restart.
 
-## 15. Remote Profile
+## 15. Remote Agent Profile (optional)
 
 ### 15.1 Overview
 
-> Remote Profile is OPTIONAL / advanced and is not required for the current local-first workflow.
+> Remote Agent Profile is OPTIONAL / advanced and is not required for the local-first workflow.
 
-Remote Profile allows Agents not running on the user's machine to access user memory. To protect the local Memory Guard, UOMP introduces the **UOMP Gateway** as the controlled entry point: the Memory Guard MUST NOT be directly exposed to the public internet, and all remote access MUST go through a user-deployed or user-trusted Gateway.
+Remote Agent Profile allows Agents that do not run on the user's machine to access user memory. The remote Agent runtime SHOULD run in Aegis Cloud or another user-isolated environment; locally, the user MUST expose Memory Guard through an **Aegis Memory Gateway** (or an equivalent, user-trusted Gateway). Memory Guard MUST NOT be exposed directly to the public internet.
+
+> **Reference direction:** Aegis Cloud (remote Agent runtime) + Aegis Memory Gateway (local entry point) + Aegis policy / lease / approval. UOMP no longer maintains a standalone Gateway or Cloud Relay product line; `apps/gateway` and `apps/relay` remain historical references only.
 
 ### 15.2 Security Requirements
 
-Remote Profile implementations MUST satisfy:
+Remote Agent Profile implementations MUST satisfy:
 
-1. Gateway and remote Agent MUST use **TLS 1.3**.
-2. Gateway SHOULD use **mTLS**, with the remote Agent holding a client certificate issued by the user or Registry.
+1. TLS 1.3 between the Gateway and the remote Agent.
+2. The Gateway SHOULD use **mTLS**; the remote Agent holds a client certificate issued by the user or a Registry.
 3. Capability Tokens issued by the local Auth Service:
-   - `profile` claim MUST be `"remote"`;
-   - `audience` claim MUST be bound to the Gateway endpoint, not to local `127.0.0.1`;
-   - `allowed_endpoints` claim SHOULD restrict allowed Gateway network locations.
-4. Gateway MUST validate Token signature, lifetime, `audience`, Session revocation status, and request path.
-5. Token lifetime SHOULD not exceed 10 minutes; Agents that need long-running access SHOULD use refresh tokens (see 15.5).
-6. The user MUST explicitly enable Remote Profile and confirm the Gateway configuration.
-7. Communication between Gateway and local Memory Guard SHOULD use mTLS or a local Unix socket.
+   - the `profile` claim MUST be `"remote"`;
+   - the `audience` claim MUST bind to the Gateway endpoint, not local `127.0.0.1`;
+   - the `allowed_endpoints` claim SHOULD restrict the Gateway network locations the Agent may use.
+4. The Gateway MUST validate the Token signature, expiry, `audience`, Session revocation state, and request path.
+5. Token lifetime SHOULD NOT exceed 10 minutes; long-running Agents SHOULD use the refresh_token mechanism (see 15.5).
+6. The user MUST explicitly enable Remote Agent Profile and confirm the Gateway configuration.
+7. The Gateway and local Memory Guard SHOULD communicate over mTLS or a local Unix socket.
+8. The remote Agent MUST NOT get direct file access to the Memory Store; only scoped responses through the Gateway may leave the user device.
+9. The Gateway MUST run in a user-trusted runtime; the reference implementation uses Aegis OS policy, leases, sandboxing, and trusted approval.
 
 ### 15.3 Deployment Models
 
-Remote Profile defaults to **user self-hosted Gateway**:
+Recommended deployment:
 
-- Users run Gateway on their own VPS, NAS, cloud server, or home server;
-- **Recommended: `uomp gateway start` (advanced command) launches with Cloudflare Tunnel**, automatically obtaining a `https://xxx.trycloudflare.com` public URL — no public IP or port forwarding needed;
-- A reverse tunnel (Cloudflare Tunnel, ngrok) may also be used manually to expose the Gateway;
-- A third-party MAY offer managed Gateway services, but open-source core implementations MUST retain self-hosting as the default and trust root.
+- **Remote Agent:** an isolated Aegis Cloud VM / container.
+- **Local entry point:** Aegis Memory Gateway on the user device, accepting remote connections over mTLS / a tunnel.
+- **Data plane:** the Memory Store always stays on the user device; Aegis Cloud does not store memory data.
 
-### 15.4 UOMP Gateway
+Users MAY self-host a Gateway (VPS, NAS, home server) or use a third-party Gateway that satisfies this section. UOMP no longer provides a hosted public Cloud Relay; any third-party Gateway MUST NOT become a plaintext-transparent relay.
 
-Gateway acts as a proxy for Memory Guard with the following responsibilities:
+### 15.4 Aegis Memory Gateway
+
+Aegis Memory Gateway is the controlled entry point for Memory Guard and is responsible for:
 
 | Responsibility | Description |
-|----------------|-------------|
-| TLS/mTLS termination | Verify the transport-layer identity of the remote Agent |
-| Token validation | Validate Capability Token signature, scope, lifetime, revocation status |
-| Request forwarding | Forward validated requests to the local Memory Guard |
-| Quota enforcement | Enforce request limits according to Token `limits` |
-| Audit logging | Record `gateway_access` events |
-| Payload caching | Temporarily store encrypted Agent output (optional) |
+|------|-------------|
+| TLS/mTLS termination | Validate the remote Agent's transport identity |
+| Token validation | Verify the Capability Token signature, scope, expiry, and revocation state |
+| Request forwarding | Forward validated requests to local Memory Guard |
+| Quota enforcement | Enforce request limits from the Token's `limits` |
+| Audit | Record `gateway_access` events |
+| Payload cache | Temporarily store encrypted Agent output (optional) |
 
-Gateway HTTP API SHOULD at least include:
+The Gateway SHOULD expose at least:
 
 ```http
 GET  /v1/health
@@ -958,30 +963,30 @@ Authorization: Bearer <gateway-token>
 X-UOMP-Agent-Id: <agent_id>
 ```
 
-> **Implementation reference**: `uomp-mvp` provides a default mTLS Gateway reference implementation in `apps/gateway`, plus `scripts/generate-gateway-certs.sh` and `scripts/test-gateway-remote.sh` for local validation.
+> **Reference implementation:** the Aegis OS memory gateway / policy / lease integration; `uomp-mvp/apps/gateway` is kept as a historical implementation and is no longer a product entry point.
 
 ### 15.5 Token Refresh
 
-Remote Agents may need to refresh Tokens due to long-running tasks or SaaS restarts:
+Remote Agents may need to refresh Tokens after long runs or SaaS restarts:
 
-1. During initial authorization, the Auth Service issues both a short-lived `access_token` and a `refresh_token`:
-   - The refresh_token can only be used to obtain a new access_token, not to read Memory;
-   - The refresh_token's `scopes` claim MUST be empty or contain only `refresh`;
-   - Lifetime is configurable, default 7 days.
+1. At initial authorization, the Auth Service issues a short-lived `access_token` and a `refresh_token`:
+   - the refresh_token can only be exchanged for a new access_token and cannot read Memory;
+   - the refresh_token `scopes` claim MUST be empty or contain only `refresh`;
+   - lifetime is configurable, default 7 days.
 2. Before the access_token expires, the Agent calls the Gateway:
    ```http
    POST /v1/sessions/{session_id}/refresh
    Authorization: Bearer <refresh_token>
    ```
-3. Gateway validates the refresh_token and Session status, then requests a new access_token from the local Auth Service and returns it.
-4. When the user revokes the Session, the refresh_token MUST become invalid simultaneously.
+3. The Gateway validates the refresh_token and Session state, requests a new access_token from the local Auth Service, and returns it.
+4. Revoking the Session MUST also invalidate the refresh_token.
 
 ### 15.6 Payload Delivery
 
-Agent-generated reports and analysis results MUST NOT remain as plaintext on remote servers. Remote Profile requires:
+Agent-generated reports and analysis results MUST NOT remain as plaintext on remote servers. Remote Agent Profile requires:
 
-1. **End-to-end encryption**: The Agent encrypts the Payload using the public key provided in the Remote Profile (RECOMMENDED: ECDH-X25519 + AES-256-GCM).
-2. **Payload Envelope**: Uploaded Payloads MUST use the following format:
+1. **End-to-end encryption**: the Agent encrypts the Payload using the public key provided in the Remote Agent Profile (RECOMMENDED: ECDH-X25519 + AES-256-GCM).
+2. **Payload Envelope**: uploaded Payloads MUST use:
    ```json
    {
      "payload_id": "pay_xxx",
@@ -999,51 +1004,14 @@ Agent-generated reports and analysis results MUST NOT remain as plaintext on rem
      "hash": "sha256:..."
    }
    ```
-3. **Relay modes** for encrypted Payload:
-   - `gateway-cache`: Agent POSTs to Gateway; user pulls from Gateway;
-   - `presigned-url`: Gateway gives Agent a one-time upload URL; Agent uploads and returns the reference;
-   - `ipfs-cid`: Ciphertext on IPFS; CID + hash anchored on-chain.
+3. **Delivery modes**:
+   - `gateway-cache`: Agent POSTs to the Gateway; the user pulls from the Gateway;
+   - `presigned-url`: the Gateway gives the Agent a one-time upload URL; the Agent uploads and returns the reference;
+   - `object-store`: a user-trusted object store holding ciphertext + hash.
 
 The user's local private key SHOULD be protected by a keystore or system keychain.
 
-### 15.7 Cloud Relay
-
-> Cloud Relay is currently design/prototype only and is not on the core path.
-
-Cloud Relay is a stateless public relay service allowing Agents to access Guard over the public internet without user configuration of mTLS certificates or Cloudflare Tunnel.
-
-**Differences from Gateway**:
-
-| Feature | Gateway | Cloud Relay |
-|---------|---------|-------------|
-| Deployment | User machine | Public server |
-| Authentication | mTLS (mutual TLS) | Public-key signature verification (Ed25519) |
-| Configuration | Required (TLS certs) | None (zero-config) |
-| Tunnel | Cloudflare Tunnel | Independent user tunnel or other |
-| Use case | User-controlled environments | Non-technical users, public relay |
-
-**Workflow**:
-
-```
-Agent → POST /v1/memory/read → Cloud Relay
-  → Verify Token (Guard public key)
-  → Rate-limit check (per session)
-  → Forward to Guard → Return result
-```
-
-The Relay only requires Guard's Ed25519 **public key** to verify Tokens. It holds no private key and cannot issue Tokens. The design supports CORS and a default rate limit of 60 req/min per session; the reference implementation remains a prototype.
-
-**Gateway + Cloud Relay combined mode**:
-
-```
-User machine: Gateway (mTLS) ← Cloudflare Tunnel → public URL
-Public:       Cloud Relay → verify sig → forward to Gateway
-Remote:       Agent → Cloud Relay
-```
-
-Users need not expose local ports or configure DNS. Relay exposes `UOMP_RELAY_URL` as an alternative to `UOMP_BASE_URL` for Agents.
-
-### 15.8 Migration to DIDComm
+### 15.7 Migration to DIDComm
 
 UOMP plans to migrate from mTLS HTTPS to **DIDComm v2** for authorization negotiation and Token delivery in the long term. In MVP, mTLS HTTPS is the default channel, and DIDComm is an optional extension.
 
@@ -1325,7 +1293,7 @@ Deletion proofs can be recorded on-chain via the `AuditAnchor` contract (§18.4)
 ### 20.1 Token Security
 
 - Capability Tokens MUST be signed by the Auth Service's private key.
-- Tokens SHOULD use short lifetimes (default 30 minutes, 10 minutes for Remote Profile).
+- Tokens SHOULD use short lifetimes (default 30 minutes, 10 minutes for Remote Agent Profile).
 - Tokens MUST NOT be persisted to locations freely accessible by the Agent.
 
 ### 20.2 Memory Store Security
@@ -1336,7 +1304,7 @@ Deletion proofs can be recorded on-chain via the `AuditAnchor` contract (§18.4)
 ### 20.3 Communication Security
 
 - Local Profile uses HTTP over localhost.
-- Remote Profile MUST use TLS 1.3 + mTLS.
+- Remote Agent Profile MUST use TLS 1.3 + mTLS.
 - SDKs MUST NOT log Tokens.
 
 ### 20.4 Agent Write Restrictions
@@ -1361,7 +1329,6 @@ Deletion proofs can be recorded on-chain via the `AuditAnchor` contract (§18.4)
 - Write version history and rollback.
 - Policy templates.
 - DIDComm v2 authorization channel.
-- Decentralized Payload Relay (IPFS, etc.).
 - TEE (Trusted Execution Environment) Agent execution for hardware-level data retention guarantees.
 - Stateless Agent execution model with per-task isolation.
 - Agent reputation system integrated with Registry.

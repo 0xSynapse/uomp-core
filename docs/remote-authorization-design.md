@@ -1,3 +1,5 @@
+> **已退役（2026-10）：** 独立 UOMP Gateway / Cloud Relay 不再维护。远程 Agent 运行时使用 Aegis Cloud，本地入口使用 Aegis Memory Gateway，审批与租约由 Aegis OS 执行。本文档保留为历史设计参考。
+
 # UOMP 远程授权设计文档
 
 > 状态：研究/预览。Phase 1 Gateway + mTLS 原型存在，但远程模式不是当前核心用户工作流；当前主线是本地 CLI + MCP。当前用法见 [README](../README.md#quick-start)。

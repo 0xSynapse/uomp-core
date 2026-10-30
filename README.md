@@ -141,7 +141,7 @@ Without these variables, UOMP runs standalone with its local Auth + Guard. The a
 | Capability tokens | EdDSA-signed JWT, 30-minute default |
 | Enforcement | Memory Guard: scope filtering, aggregation, audit log |
 | Revocation | `revoke` / `close` invalidate the next request |
-| Remote access | Gateway with mTLS and Cloudflare Tunnel (advanced) |
+| Remote access | Aegis Cloud remote Agent + Aegis Memory Gateway (optional; standalone gateway/relay retired) |
 | SDK | TypeScript (`@uomp/sdk`) |
 | Examples | Calendar agent and stock analyst |
 | Writes | Not available in the MVP; writes return `503` |
@@ -350,8 +350,8 @@ packages/
   cli/        `uomp` command-line tool
 apps/
   server/     combined Auth + Guard service
-  gateway/    remote access (mTLS + tunnel)
-  relay/      stateless relay (preview)
+  gateway/    historical remote gateway (deprecated)
+  relay/      historical cloud relay (deprecated)
 examples/
   calendar-agent/
   stock-analyst/
@@ -498,7 +498,7 @@ export UOMP_AEGIS_AGENT=uomp
 | Capability Token | EdDSA 签名 JWT，默认 30 分钟 |
 | 执行 | Memory Guard：范围过滤、聚合、审计日志 |
 | 撤销 | `revoke` / `close` 后下一个请求失效 |
-| 远程访问 | Gateway + mTLS + Cloudflare Tunnel（高级） |
+| 远程访问 | Aegis Cloud 远程 Agent + Aegis Memory Gateway（可选；独立 gateway/relay 已退役） |
 | SDK | TypeScript（`@uomp/sdk`） |
 | 示例 | Calendar Agent、Stock Analyst |
 | 写入 | MVP 不支持，写入返回 `503` |
@@ -707,8 +707,8 @@ packages/
   cli/        `uomp` 命令行工具
 apps/
   server/     Auth + Guard 组合服务
-  gateway/    远程访问（mTLS + 隧道）
-  relay/      无状态中继（预览）
+  gateway/    历史远程 Gateway（已退役）
+  relay/      历史 Cloud Relay（已退役）
 examples/
   calendar-agent/
   stock-analyst/

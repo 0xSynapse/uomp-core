@@ -1,4 +1,6 @@
-# UOMP Browser Dashboard
+# UOMP Browser Dashboard (historical)
+
+> **Deprecated (2026-10):** This example depended on `uomp gateway start --browser`, which is retired. It is kept as a historical reference. Remote Agents now use Aegis Cloud + Aegis Memory Gateway.
 
 A zero-install portfolio dashboard that runs entirely in the browser. No CLI, no pnpm, no server-side code.
 

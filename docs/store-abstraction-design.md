@@ -333,7 +333,9 @@ uomp.isGatewayOnline: boolean
 
 Webapp 据此控制 UI：写入按钮禁用、顶部显示离线 banner。
 
-## 9. UOMP Cloud Relay（公共转发节点）
+## 9. UOMP Cloud Relay（公共转发节点，已退役）
+
+> **已退役（2026-10）：** 本节仅保留历史设计。UOMP 不再运营公共 Relay；远程 Agent 使用 Aegis Cloud + Aegis Memory Gateway。
 
 Cloud Relay 是一个**无状态的公共 Gateway**，替代用户本地 Gateway 处理写请求和聚合查询。任何人都可以部署，UOMP 官方运营一个作为默认值。
 

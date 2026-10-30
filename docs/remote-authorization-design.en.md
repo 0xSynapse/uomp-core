@@ -1,3 +1,5 @@
+> **Retired (2026-10):** The standalone UOMP Gateway / Cloud Relay is no longer maintained. Remote Agents run on Aegis Cloud, the local entry point is Aegis Memory Gateway, and approval/leases are enforced by Aegis OS. This document is kept as historical design context.
+
 # UOMP Remote Authorization Design Document
 
 > Status: research/preview. A Phase 1 Gateway + mTLS prototype exists, but remote mode is not the current core user workflow; the current focus is the local CLI + MCP loop. See the [README](../README.md#quick-start) for current usage.

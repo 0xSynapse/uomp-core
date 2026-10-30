@@ -1,6 +1,6 @@
 # UOMP Browser SDK 设计文档
 
-> 状态：已暂缓。浏览器/钱包不在当前路线图上，本文档保留为研究记录。
+> 状态：已暂缓。浏览器/钱包不在当前路线图上，本文档保留为研究记录。独立 Gateway / Cloud Relay 已退役；远程 Agent 使用 Aegis Cloud + Aegis Memory Gateway。
 
 > 线上 Demo：https://www.uomp.org/dashboard/
 
