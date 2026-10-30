@@ -1,6 +1,7 @@
 import type { Scopes } from '@uomp/core';
 import { aggregateDecisions, scopesToResources } from './mapping.js';
 import type {
+  AegisEscalation,
   AegisLease,
   AegisPolicyClient,
   AegisScopeDecision,
@@ -50,5 +51,9 @@ export class AegisConsentBridge {
     for (const escalationId of escalationIds) {
       await this.client.denyEscalation(escalationId);
     }
+  }
+
+  async listEscalations(): Promise<AegisEscalation[]> {
+    return this.client.listEscalations();
   }
 }

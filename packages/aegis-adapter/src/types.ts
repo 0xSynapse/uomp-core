@@ -28,6 +28,18 @@ export interface AegisLease {
   granted_by: string;
 }
 
+export interface AegisEscalation {
+  escalation_id: string;
+  org_id: string;
+  agent_id: string;
+  action: string;
+  target_resource: string;
+  reason: string;
+  suggested_lease_scope: string;
+  status: string;
+  created_at_ms: number;
+}
+
 export interface AegisScopeDecision {
   decision: AegisDecisionKind;
   requests: AegisMemoryRequest[];
@@ -45,4 +57,5 @@ export interface AegisPolicyClient {
   evaluate(action: MemoryAction, resource: string): Promise<AegisMemoryDecision>;
   approveEscalation(escalationId: string, ttlSecs: number): Promise<AegisLease>;
   denyEscalation(escalationId: string): Promise<void>;
+  listEscalations(): Promise<AegisEscalation[]>;
 }

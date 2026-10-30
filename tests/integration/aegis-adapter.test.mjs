@@ -187,3 +187,43 @@ test('HTTP client approves and denies through the trusted approval endpoint', as
     /Aegis OS Syscall Error/,
   );
 });
+
+test('HTTP client lists Aegis escalations', async () => {
+  const fetchImpl = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    return new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      id: body.id,
+      result: {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            escalations: [{
+              escalation_id: 'esc-1',
+              org_id: 'local',
+              agent_id: 'remote-agent',
+              action: 'memory.read',
+              target_resource: 'memory:tag:notes/projects',
+              reason: 'Boundary syscall requires explicit lease',
+              suggested_lease_scope: 'action=memory.read, resource=*',
+              status: 'pending',
+              created_at_ms: 1000,
+            }],
+          }),
+        }],
+      },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+
+  const client = new HttpAegisMcpClient({
+    endpoint: 'http://127.0.0.1:7080/mcp',
+    token: 'aop_test',
+    orgId: 'local',
+    agentId: 'uomp',
+    fetchImpl,
+  });
+
+  const escalations = await client.listEscalations();
+  assert.equal(escalations.length, 1);
+  assert.equal(escalations[0].escalation_id, 'esc-1');
+});

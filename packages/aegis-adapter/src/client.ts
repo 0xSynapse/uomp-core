@@ -1,4 +1,5 @@
 import type {
+  AegisEscalation,
   AegisLease,
   AegisMemoryDecision,
   AegisPolicyClient,
@@ -54,6 +55,14 @@ export class HttpAegisMcpClient implements AegisPolicyClient {
 
   async denyEscalation(escalationId: string): Promise<void> {
     await this.decideEscalation(escalationId, 'deny', 0);
+  }
+
+  async listEscalations(): Promise<AegisEscalation[]> {
+    const result = await this.callTool('policy_list_escalations', {});
+    if (!result || typeof result !== 'object' || !Array.isArray((result as { escalations?: unknown }).escalations)) {
+      throw new Error('Aegis escalation list was malformed');
+    }
+    return (result as { escalations: AegisEscalation[] }).escalations;
   }
 
   private async decideEscalation(

@@ -160,6 +160,9 @@ importers:
       '@hono/node-server':
         specifier: ^1.11.0
         version: 1.19.14(hono@4.12.29)
+      '@uomp/aegis-adapter':
+        specifier: workspace:*
+        version: link:../aegis-adapter
       '@uomp/auth':
         specifier: workspace:*
         version: link:../auth

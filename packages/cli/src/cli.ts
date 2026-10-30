@@ -26,6 +26,7 @@ import { StartCommands } from './commands/start.js';
 import { SetupCommands } from './commands/setup.js';
 import { StagedCommands } from './commands/staged.js';
 import { PayloadCommands } from './commands/payload.js';
+import { ApprovalsCommands } from './commands/approvals.js';
 import { parseHost, parsePort } from './utils/server.js';
 
 if (process.platform === 'win32') {
@@ -139,6 +140,7 @@ program.addCommand(ConnectCommands.get());
 program.addCommand(SetupCommands.get());
 program.addCommand(StagedCommands.get());
 program.addCommand(PayloadCommands.get());
+program.addCommand(ApprovalsCommands.get());
 program.addCommand(ServeCommands.get());
 program.addCommand(StartCommands.get());
 program.addCommand(McpCommands.get());
@@ -242,6 +244,7 @@ Manage access:
   $ uomp staged approve <staged-write-id>
   $ uomp payload list
   $ uomp payload get <payload-id>
+  $ uomp approvals
   $ uomp disconnect claude
   $ uomp stop
 
