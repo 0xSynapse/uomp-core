@@ -45,7 +45,7 @@ export async function loadSessionCredentials(
   };
 }
 
-function resolveSessionPath(config: UompConfig, session: string): string {
+export function resolveSessionPath(config: UompConfig, session: string): string {
   if (session.startsWith('~/')) {
     return join(homedir(), session.slice(2));
   }

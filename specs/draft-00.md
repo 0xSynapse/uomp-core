@@ -13,6 +13,7 @@
 | 2026-07-12 | Draft-00 initial release. |
 | 2026-07-23 | Added Cloud Relay (§15.7), Store abstraction (§0), Payload API (§15.6). Updated `uom.json` schema (§6.2-6.4) with `fields`, `purposes`, `external_data_sources`, `package`. Updated the architecture diagram to include Gateway and Relay. Added FHE to Future Work (§22). Marked on-chain audit as Phase 4. |
 | 2026-10-29 | Local-first reference implementation: CLI + stdio MCP path, 0600 session env delivery, Auth + Guard combined service. Reworked §5 architecture and diagrams; Remote remains optional/preview. |
+| 2026-10-30 | Remote Agent Profile aligned with Aegis OS: remote Agent runs on Aegis Cloud, local entry is Aegis Memory Gateway. Standalone UOMP Cloud Relay retired. |
 
 ---
 
@@ -24,7 +25,7 @@ User-Owned Memory Protocol（UOMP）定义了一种用户主权型授权协议�
 
 本文档为 UOMP 协议草案（Draft-00），描述协议设计意图、数据格式、HTTP API 和安全要求。本文档旨在通过公开讨论后演进为正式标准。本文档中的关键词 "MUST"、"MUST NOT"、"REQUIRED"、"SHALL"、"SHALL NOT"、"SHOULD"、"SHOULD NOT"、"RECOMMENDED"、"MAY"、"OPTIONAL" 按照 [RFC 2119](https://datatracker.ietf.org/doc/html/rfc2119) 解释。
 
-> **参考实现状态（2026-10）：** 当前 `uomp` CLI 优先实现 Local Profile：`import`、`authorize`（写入 `0600` 会话 env 文件）、`serve`、`mcp`、`sessions`、`audit`、`revoke`。stdio MCP bridge 为实验能力。Remote Profile 和 Cloud Relay 是可选/预览能力，不是通过一致性验证的必要条件。
+> **参考实现状态（2026-10）：** 当前 `uomp` reference CLI 优先实现 Local Profile：用户运行一次 `uomp setup` 完成导入、客户端配置和后台服务，不预先授权；Agent 第一次请求 tag/key 时打开本地审批页，用户批准后继续。`pending` / `approve` / `deny` 是终端兜底；`connect` 是高级预授权入口，`authorize`、`serve`、`mcp` 是手动/脚本路径。stdio MCP bridge 为实验能力。Remote Agent Profile 是可选能力，参考实现使用 Aegis Cloud + Aegis Memory Gateway；独立 Cloud Relay 已退役。Aegis OS 是执行该协议的参考运行时。
 
 ## 3. Introduction
 
@@ -67,7 +68,7 @@ UOMP 的设计目标是：
 | **MCP bridge** | 可选的 stdio 适配器（`uomp mcp`），把 MCP 工具调用转换为 Guard HTTP 请求。 |
 | **uom.json** | Agent 声明文件，描述 Agent 身份和默认请求的记忆范围。 |
 | **Local Profile** | 本机部署模式，Memory Guard 监听 `127.0.0.1`；默认且当前实现。 |
-| **Remote Profile** | 远程部署模式，Agent 经 Gateway 访问 Guard；可选/高级。 |
+| **Remote Agent Profile** | 远程 Agent 经 Aegis Memory Gateway 访问本地 Guard；可选/高级，数据不离开用户设备。 |
 
 ## 5. Protocol Overview
 
@@ -86,22 +87,21 @@ UOMP 的完整架构包含以下组件：
 | **Memory Guard** | 用户本机 | Token 校验、scope 过滤、聚合查询、审计日志记录。 |
 | **CLI** | 用户本机 | 用户交互：导入、授权、会话、审计、撤销。 |
 | **MCP bridge** | 用户本机（可选） | stdio MCP 适配器（`uomp mcp`）：Claude Desktop / Cursor / OpenCode → HTTP Guard。实验能力。 |
-| **Gateway** | 用户本机（可选） | mTLS 隧道 + Token 转发，将 Guard 暴露给远程 Agent。支持 Cloudflare Tunnel。 |
-| **Cloud Relay** | 公共网络（设计/预览） | 无状态公共中继，仅需 Guard 公钥即可验证 Token 并转发请求。 |
+| **Aegis Memory Gateway** | 用户本机（可选） | mTLS/Tunnel 入口，把远程 Agent 的已校验请求转发给本地 Guard；参考实现由 Aegis OS 提供。 |
 | **Agent** | 任意位置 | 独立进程，携带 Capability Token 通过 Guard 或 Gateway 读取数据。 |
 
 三条访问路径：
 
 1. **本地（默认）**：CLI 完成授权并把 Token 写入 `0600` 会话 env 文件；Agent 直接访问 `127.0.0.1:9374` 上的 Guard。
 2. **MCP（本地适配器，实验）**：MCP 客户端通过 stdio 启动 `uomp mcp`；bridge 读取同一个会话 env 文件，再以 HTTP + Token 访问 Guard。MCP bridge 不引入新的信任边界。
-3. **远程（可选/高级）**：Agent 通过 Gateway（mTLS + Tunnel）访问 Guard。
+3. **远程（可选/高级）**：远程 Agent（参考实现：Aegis Cloud）通过 Aegis Memory Gateway（mTLS + Tunnel）访问本地 Guard；数据留在本机。
 
-Local Profile 和它的 MCP 适配器是当前参考实现的主路径；Remote Profile 是可选扩展，不要求所有实现支持。
+Local Profile 和它的 MCP 适配器是当前参考实现的主路径；Remote Agent Profile 是可选扩展，不要求所有实现支持。
 
 ### 5.2 Flow
 
 1. Agent 作为独立进程运行，提供 `uom.json` 声明其身份和默认请求的记忆范围。
-2. 用户通过本机 CLI 执行 `uomp authorize`（可选先 `discover` / `connect`），Auth Service 创建 Session（`created` 状态）。Auth Service 可以与 Memory Guard / Store 位于同一机器，也可以由用户选择的可信服务提供。
+2. 用户运行一次 `uomp setup`（或手动 `uomp authorize`）。Agent 第一次请求数据时，Auth Service 创建 Session（`created` 状态），UOMP 打开本地审批页；用户确认后签发 Token。Auth Service 可以与 Memory Guard / Store 位于同一机器，也可以由用户选择的可信服务提供。
 3. 用户确认或调整授权范围后，Auth Service 签发 Capability Token，并将其写入 `0600` 会话 env 文件（`UOM_TOKEN` + `UOMP_BASE_URL`）。
 4. Session 进入 `active` 状态，Agent 或 MCP bridge 加载该 env 文件。
 5. Agent 或 MCP bridge 通过 HTTP API 携带 Token 访问 Memory Guard。
@@ -119,9 +119,9 @@ UOMP 定义两种部署配置：
 | Profile | 默认端口 | 传输 | 认证 | 存储 | 状态 |
 |---------|---------|------|------|------|------|
 | Local Profile | `127.0.0.1:9374` | HTTP | Capability Token | SQLite（本地） | 默认 / 当前实现 |
-| Remote Profile | 用户配置 | HTTPS | Capability Token + mTLS | 用户指定 | 可选 / 高级 |
+| Remote Agent Profile | 用户配置 | HTTPS + mTLS | Capability Token + mTLS | 本地（数据不离开用户设备） | 可选 / 高级；参考实现 Aegis |
 
-Local Profile 为默认且 RECOMMENDED 配置，也是参考实现的主路径。Remote Profile 必须显式开启。
+Local Profile 为默认且 RECOMMENDED 配置，也是参考实现的主路径。Remote Agent Profile 必须显式开启。
 
 MCP bridge 不是独立 Profile，而是 Local Profile 上的可选 stdio 适配器。
 
@@ -335,7 +335,7 @@ UOMP Capability Token 的 JWT payload 使用以下自定义 claims（snake_case�
 | `scopes` | object | MUST | 读写授权范围。 |
 | `limits` | object | OPTIONAL | 查询次数限制。MVP 中写入但不强制扣除。 |
 | `profile` | string | OPTIONAL | `local` 或 `remote`，默认 `local`。 |
-| `audience` | string | OPTIONAL | Token 绑定的 Memory Guard 端点。Remote Profile 时 REQUIRED。 |
+| `audience` | string | OPTIONAL | Token 绑定的 Memory Guard 端点。Remote Agent Profile 时 REQUIRED。 |
 | `allowed_endpoints` | string[] | OPTIONAL | 允许使用该 Token 的网络位置白名单。 |
 | `allowed_fields` | string[] | OPTIONAL | 每个 Memory Item 中允许返回的字段列表。Memory Guard MUST 按此字段过滤返回数据。 |
 | `aggregation_only` | boolean | OPTIONAL | 默认 `false`。若为 `true`，仅允许聚合查询，禁止返回单个 Memory Item 原始数据。 |
@@ -352,7 +352,7 @@ Auth Service 和 Memory Guard 在收到 Token 后 MUST 执行以下校验：
 3. Token 对应的 Session 未被关闭或撤销（MVP 中通过黑名单表实现；生产实现 SHOULD 显式查询 Session 状态）。
 4. Token 不在黑名单中。
 5. `profile` 与当前部署配置匹配。
-6. `audience` 与当前 Memory Guard 端点匹配（Remote Profile 时 REQUIRED）。
+6. `audience` 与当前 Memory Guard 端点匹配（Remote Agent Profile 时 REQUIRED）。
 
 任一校验失败，Memory Guard MUST 拒绝请求并返回错误。
 
@@ -361,7 +361,7 @@ Auth Service 和 Memory Guard 在收到 Token 后 MUST 执行以下校验：
 ### 8.1 Base URL
 
 - Local Profile: `http://127.0.0.1:9374`
-- Remote Profile: 用户配置的 HTTPS URL
+- Remote Agent Profile: 用户配置的 HTTPS URL
 
 ### 8.2 Versioning
 
@@ -566,8 +566,17 @@ Auth Service MUST 校验 `session_id` 与路径一致，并记录审计日志。
 | GET | `/v1/memory/aggregate?tag=:tag&op=:op&field=:field` | 聚合查询（sum/avg/count/min/max），不返回原始数据，见 §10.5 |
 | GET | `/v1/audit` | 查询审计日志，见 §18 |
 | POST | `/v1/memory/query` | 语义查询（未来扩展） |
-| PUT | `/v1/memory/:key` | 写入或更新（MVP 返回 `WRITE_NOT_AVAILABLE`） |
+| PUT | `/v1/memory/:key` | 暂存写入；返回 `202` + `staged_write_id`，用户批准后生效 |
 | DELETE | `/v1/memory/:key` | 删除（MVP 返回 `WRITE_NOT_AVAILABLE`） |
+| GET | `/v1/staged-writes` | 列出待审批写入（管理员） |
+| POST | `/v1/staged-writes/:id/approve` | 批准并应用暂存写入（管理员） |
+| POST | `/v1/staged-writes/:id/deny` | 拒绝暂存写入（管理员） |
+| POST | `/v1/payload` | 上传加密 payload envelope |
+| GET | `/v1/payload/:id` | 读取 payload（同 session 或管理员） |
+| GET | `/v1/payload` | 列出 payload 元数据（管理员） |
+| DELETE | `/v1/payload/:id` | 删除 payload（管理员） |
+| POST | `/v1/remote/requests` | 远程 Agent 发起授权请求（公开，返回 poll secret） |
+| GET | `/v1/remote/requests/:id?secret=:poll_secret` | 轮询审批状态；批准后一次性领取 token |
 
 ### 10.2 Read by Key
 
@@ -701,8 +710,8 @@ Guard MUST 先校验该 tag 的访问授权（与普通 tag 查询一致），�
 ### 11.3 Sensitivity Rules
 
 - `sensitivity=high` 的 Memory Item 不能通过 tag 授权访问。
-- Agent 在 MVP 阶段 MUST NOT 写入任何 Memory Item。
-- Milestone 2 引入 Staging 写入后，Agent 写入高敏感项仍 MUST 被拒绝。
+- Agent 写入 MUST 进入 Staging，用户批准后生效。
+- Agent 写入高敏感项 MUST 被拒绝。
 
 ## 12. Memory Import Format
 
@@ -903,17 +912,19 @@ uom-calendar-agent
 
 用户 UI（如 CLI）运行在 Memory Store / Guard 所在主机上，负责完成身份验证、授权、Token 签发，再把 Token 交给 Agent。Agent 本身不参与授权决策。MCP bridge 读取同一个 env 文件，并在每次工具调用前重新读取，以支持重新授权后自动生效。
 
-## 15. Remote Profile
+## 15. Remote Agent Profile (optional)
 
 ### 15.1 Overview
 
-> Remote Profile 是 OPTIONAL / 高级能力，不是当前本地优先工作流的必要条件。
+> Remote Agent Profile 是 OPTIONAL / 高级能力，不是本地优先工作流的必要条件。
 
-Remote Profile 允许 Agent 不在用户本机运行时访问用户记忆。为了保护本地 Memory Guard，UOMP 引入 **UOMP Gateway** 作为受控入口：Memory Guard 不直接暴露到公网，所有远程访问 MUST 经过用户部署或信任的 Gateway。
+Remote Agent Profile 允许 Agent 不在用户本机运行时访问用户记忆。远程 Agent 的运行时 SHOULD 放在 Aegis Cloud 或用户自己的隔离环境；用户本地 MUST 通过 **Aegis Memory Gateway**（或等价的、用户信任的 Gateway）暴露 Memory Guard。Memory Guard MUST NOT 直接暴露到公网。
+
+> **参考实现方向：** Aegis Cloud（远程 Agent 运行时）+ Aegis Memory Gateway（本地入口）+ Aegis policy / lease / approval。UOMP 不再维护独立的 Gateway 或 Cloud Relay 产品线；`apps/gateway` 和 `apps/relay` 仅作为历史参考。
 
 ### 15.2 Security Requirements
 
-Remote Profile 实现 MUST 满足：
+Remote Agent Profile 实现 MUST 满足：
 
 1. Gateway 与远程 Agent 之间使用 **TLS 1.3**。
 2. Gateway SHOULD 使用 **mTLS**，远程 Agent 持有用户或 Registry 签发的客户端证书。
@@ -923,21 +934,24 @@ Remote Profile 实现 MUST 满足：
    - `allowed_endpoints` claim SHOULD 限制允许访问的 Gateway 网络位置。
 4. Gateway MUST 校验 Token 签名、有效期、`audience`、Session 撤销状态以及请求路径。
 5. Token 有效期 SHOULD 不超过 10 分钟；需要长期运行的 Agent SHOULD 使用 refresh_token 机制（见 15.5）。
-6. 用户 MUST 显式开启 Remote Profile 并确认 Gateway 配置。
+6. 用户 MUST 显式开启 Remote Agent Profile 并确认 Gateway 配置。
 7. Gateway 与本地 Memory Guard 之间 SHOULD 通过 mTLS 或本地 Unix socket 通信。
+8. 远程 Agent MUST NOT 获得 Memory Store 的直接文件访问；只有经过 Gateway 的 scoped response 可以离开用户设备。
+9. Gateway MUST 由用户信任的运行时执行；参考实现使用 Aegis OS 的 policy、lease、sandbox 与 trusted approval。
 
 ### 15.3 Deployment Models
 
-Remote Profile 默认采用 **用户自托管 Gateway**：
+推荐部署：
 
-- 用户在自己的 VPS、NAS、云服务器或家庭服务器上运行 Gateway；
-- **推荐：`uomp gateway start`（高级命令）一键启动 Cloudflare Tunnel**，自动获取 `https://xxx.trycloudflare.com` 公网地址，无需公网 IP 或端口转发；
-- 也可以手动使用反向隧道（如 Cloudflare Tunnel、ngrok）暴露 Gateway；
-- Gateway 服务 MAY 由第三方商业化托管，但开源 core 实现 MUST 保留自托管路径作为默认选项。
+- **远程 Agent：** Aegis Cloud 的隔离 VM / 容器。
+- **本地入口：** Aegis Memory Gateway，运行在用户设备上，通过 mTLS / Tunnel 接受远程连接。
+- **数据面：** Memory Store 始终留在用户设备；Aegis Cloud 不保存记忆数据。
 
-### 15.4 UOMP Gateway
+用户也可以自托管 Gateway（VPS、NAS、家庭服务器），或使用满足本节要求的第三方 Gateway。UOMP 不再提供托管的公共 Cloud Relay；任何第三方 Gateway MUST NOT 成为可读取明文的透明中继。
 
-Gateway 是 Memory Guard 的代理，承担以下职责：
+### 15.4 Aegis Memory Gateway
+
+Aegis Memory Gateway 是 Memory Guard 的受控入口，承担以下职责：
 
 | 职责 | 说明 |
 |------|------|
@@ -957,7 +971,7 @@ GET  /v1/memory/{key}
 GET  /v1/memory?tag={tag}
 GET  /v1/memory/aggregate?tag={tag}&op={op}
 GET  /v1/audit?session_id={session_id}
-POST /v1/payload/upload
+POST /v1/payload
 GET  /v1/payload/{payload_id}
 POST /v1/sessions/{session_id}/deletion-proof
 ```
@@ -969,7 +983,7 @@ Authorization: Bearer <gateway-token>
 X-UOMP-Agent-Id: <agent_id>
 ```
 
-> **实现参考**：`uomp-mvp` 在 `apps/gateway` 中提供了默认的 mTLS Gateway 参考实现，并附带 `scripts/generate-gateway-certs.sh` 与 `scripts/test-gateway-remote.sh` 用于本地验证。
+> **实现参考：** Aegis OS 的 memory gateway / policy / lease 集成；`uomp-mvp` 的 `apps/gateway` 仅保留为历史实现，不再作为产品入口。
 
 ### 15.5 Token Refresh
 
@@ -989,9 +1003,9 @@ X-UOMP-Agent-Id: <agent_id>
 
 ### 15.6 Payload Delivery
 
-Agent 生成的报告、分析结果等 Payload 不应以明文形式留在远程服务器。Remote Profile 要求：
+Agent 生成的报告、分析结果等 Payload 不应以明文形式留在远程服务器。Remote Agent Profile 要求：
 
-1. **端到端加密**：Agent 使用 Remote Profile 中用户提供的公钥加密 Payload（推荐 ECDH-X25519 + AES-256-GCM）。
+1. **端到端加密**：Agent 使用 Remote Agent Profile 中用户提供的公钥加密 Payload（推荐 ECDH-X25519 + AES-256-GCM）。
 2. **Payload Envelope**：上传的 Payload MUST 使用以下格式：
    ```json
    {
@@ -1010,51 +1024,14 @@ Agent 生成的报告、分析结果等 Payload 不应以明文形式留在远�
      "hash": "sha256:..."
    }
    ```
-3. **Relay 模式**：加密后的 Payload 可通过以下方式交付：
+3. **Delivery modes**：
    - `gateway-cache`：Agent POST 到 Gateway，用户从 Gateway 拉取；
    - `presigned-url`：Gateway 提供一次性上传 URL，Agent 上传后返回引用；
-   - `ipfs-cid`：密文上 IPFS，链上存 CID + hash。
+   - `object-store`：用户信任的对象存储，密文 + hash。
 
 用户本地私钥 SHOULD 受 keystore 或系统 keychain 保护。
 
-### 15.7 Cloud Relay
-
-> Cloud Relay 目前是设计/原型阶段，不属于当前核心路径。
-
-Cloud Relay 是无状态公共中继服务，允许 Agent 通过公共网络访问 Guard，无需用户配置 mTLS 证书或 Cloudflare Tunnel。
-
-**与 Gateway 的区别**：
-
-| 特性 | Gateway | Cloud Relay |
-|------|---------|-------------|
-| 部署位置 | 用户本机 | 公共服务器 |
-| 认证方式 | mTLS（双向证书） | 公钥验签（Ed25519） |
-| 需要配置 | 是（TLS 证书） | 否（零配置） |
-| 隧道 | Cloudflare Tunnel | 用户独立隧道或其他 |
-| 适用场景 | 用户可控环境 | 非技术用户、公共中继 |
-
-**工作流**：
-
-```
-Agent → POST /v1/memory/read → Cloud Relay
-  → 验证 Token（Guard 公钥）
-  → 限流检查（per session）
-  → 转发到 Guard → 返回结果
-```
-
-Relay 仅需 Guard 的 Ed25519 **公钥** 即可验证 Token，不持有私钥，无法签发 Token。设计上支持 CORS 与每 session 默认 60 req/min 的限流；参考实现仍为原型。
-
-**Gateway + Cloud Relay 组合模式**：
-
-```
-用户机器:  Gateway (mTLS) ← Cloudflare Tunnel → 公网 URL
-公共:     Cloud Relay → 验签 → 转发到 Gateway
-远程:     Agent → Cloud Relay
-```
-
-用户无需暴露本地端口或配置 DNS。Relay 面向 Agent 侧提供 `UOMP_RELAY_URL` 作为 `UOMP_BASE_URL` 的替代。
-
-### 15.8 Migration to DIDComm
+### 15.7 Migration to DIDComm
 
 UOMP 长期计划从 mTLS HTTPS 迁移到 **DIDComm v2** 作为授权协商与 Token 交付通道。MVP 阶段 mTLS HTTPS 为默认通道，DIDComm 作为可选扩展。
 
@@ -1336,7 +1313,7 @@ Auth Service 或 Gateway 收到后：
 ### 20.1 Token Security
 
 - Capability Token MUST 由 Auth Service 私钥签名。
-- Token SHOULD 使用短有效期（默认 30 分钟，Remote Profile 10 分钟）。
+- Token SHOULD 使用短有效期（默认 30 分钟，Remote Agent Profile 10 分钟）。
 - Token MUST NOT 被持久化到 Agent 可任意读取的位置。
 
 ### 20.2 Memory Store Security
@@ -1347,14 +1324,15 @@ Auth Service 或 Gateway 收到后：
 ### 20.3 Communication Security
 
 - Local Profile 使用 HTTP over localhost。
-- Remote Profile MUST 使用 TLS 1.3 + mTLS。
+- Remote Agent Profile MUST 使用 TLS 1.3 + mTLS。
 - SDK MUST NOT 记录 Token。
 
 ### 20.4 Agent Write Restrictions
 
-- MVP 阶段 Agent MUST NOT 写入 Memory。
-- Milestone 2 引入 Staging 写入后，Agent 写入 MUST 经用户确认才生效。
+- Agent 写入 MUST 先进入 Staging，用户确认后才生效。
+- Agent MUST NOT 直接修改 Memory Store。
 - Agent MUST NOT 写入 `sensitivity=high` 的 Memory Item。
+- 暂存写入 MUST 记录发起 Agent、Session、范围、时间和审批人。
 
 ## 21. Privacy Considerations
 
@@ -1366,13 +1344,11 @@ Auth Service 或 Gateway 收到后：
 ## 22. Future Work
 
 - 链上审计（Phase 4）：Starknet `AuditAnchor` 合约，Authorization / Revocation / Access 事件上链。
-- Agent 写入 Staging 机制。
 - **FHE 集成（Phase 7-9）**：全同态加密。Agent 在密文上计算，永远看不到明文。结合链上审计实现 trustless 数据授权闭环。详见 `docs/on-chain-audit-design.md` §10。
 - 语义检索（`query` 接口）。
 - 写入版本历史与回滚。
 - 策略模板。
 - DIDComm v2 授权通道。
-- 去中心化 Payload Relay（IPFS 等）。
 - TEE（可信执行环境）Agent 执行，实现硬件级数据保留保证。
 - 无状态 Agent（Stateless Agent）执行模型，任务级别隔离。
 - Agent 信誉系统与 Registry 集成。
@@ -1388,31 +1364,38 @@ Auth Service 或 Gateway 收到后：
 
 ## 附录 A: 最小交互示例
 
-> 参考 CLI 的当前本地流程。`discover` / `connect` / `registry` 是默认隐藏的高级命令，不在核心路径上。
+> 参考 CLI 的当前本地流程。`setup` 是一次性入口；Agent 在需要数据时发起请求，UOMP 打开审批页。`connect` 是高级预授权入口，`authorize` / `mcp --print-config` 是手动/脚本 fallback；`discover` / `inspect` / `registry` 是默认隐藏的高级命令。
 
 ```bash
-# 终端 1：启动本地 Auth + Guard
-uomp serve
+# MCP 客户端：一次性设置（导入 + 写配置 + 后台服务），不授权
+uomp setup claude --vault ~/Obsidian/MyVault
+# 重启 Claude Desktop，然后在客户端里请求数据
 
-# 终端 2：导入、授权并加载会话
-uomp import ~/Obsidian/MyVault
-uomp authorize ./examples/calendar-agent \
-  --scope preference \
-  --output ~/.uomp/calendar.env \
-  --no-server
-source ~/.uomp/calendar.env
+# Agent 第一次请求时，UOMP 打开审批页；终端兜底：
+uomp pending
+uomp approve <request-id>
+uomp deny <request-id>
 
-# 运行 Agent（独立进程，携带 Token）
+# 高级：预授权 / 脚本
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+
+# Agent 包：授权 + 写会话 env 文件
+uomp connect ./examples/calendar-agent --scope preference
+source ~/.uomp/sessions/<session-id>.env
 node ./examples/calendar-agent/index.js
 
-# 可选：为 Claude Desktop / Cursor 生成 MCP 配置
+# 手动 / 不支持的客户端
+uomp serve
+uomp authorize --scope notes/projects --output ~/.uomp/calendar.env --no-server
 uomp mcp --session ~/.uomp/calendar.env --print-config
 
 # 查看会话与审计
 uomp sessions
 uomp audit --limit 20
 
-# 撤销会话
+# 断开客户端 / 停止后台服务 / 撤销会话
+uomp disconnect claude
+uomp stop
 uomp revoke <session-id>
 ```
 

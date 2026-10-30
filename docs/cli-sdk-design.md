@@ -1,25 +1,41 @@
 # UOMP CLI/SDK 设计文档
 
-> **状态：历史设计文档（CLI-first 之前）。** 当前 CLI 主路径是 `init → import → authorize → serve/mcp → sessions / revoke / audit`；`discover`、`connect`、`registry` 是默认隐藏的高级命令，`authorize` 默认写入 `0600` 会话 env 文件而不是打印 JWT。当前用法见 [README](../README.md#quick-start)。
+> **状态：历史设计文档（CLI-first 之前）。** 当前 CLI 主路径是让 Agent 客户端做入口：用户只运行一次 `uomp setup <client>`，之后由 Agent 在需要时发起请求，UOMP 打开本地审批页。`connect` 是高级预授权入口，`authorize` 和 `mcp --print-config` 是手动/脚本 fallback；`discover`、`inspect`、`registry` 默认隐藏。远程 Gateway / Cloud Relay 已退役；远程 Agent 使用 Aegis Cloud + Aegis Memory Gateway。当前用法见 [README](../README.md#quick-start)。
 >
 > 下面保留原始设计分析，作为股票分析 Agent 场景的历史参考。
 
 ## 当前 CLI（2026-10）
 
 ```bash
-# 一次性初始化
+# 一次性初始化（可选；setup 会自动创建）
 uomp init
-uomp import ~/Obsidian/MyVault
 
-# 终端 1
-uomp serve
+# 一次性设置客户端：导入 + 写配置 + 后台服务，不授权
+uomp setup claude --vault ~/Obsidian/MyVault
 
-# 终端 2
-uomp authorize ./agent --scope notes/projects --no-server
-uomp mcp --session ~/.uomp/mcp-client.env --print-config
-uomp sessions
+# 之后由客户端发起请求，UOMP 打开审批页；终端兜底：
+uomp pending
+uomp approve <request-id>
+uomp deny <request-id>
+
+# 管理
+uomp status
 uomp audit
+uomp disconnect claude
+uomp stop
 uomp revoke <session-id>
+
+# 高级：预授权 / 脚本
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+uomp connect ./examples/stock-analyst --scope portfolio:holdings --allow-key AAPL MSFT
+```
+
+手动 fallback（不支持的客户端）：
+
+```bash
+uomp serve
+uomp authorize --scope notes/projects --output ~/.uomp/mcp-client.env --no-server
+uomp mcp --session ~/.uomp/mcp-client.env --print-config
 ```
 
 ---
@@ -60,7 +76,7 @@ uomp revoke <session-id>
 1. 小王把自己的持仓从券商 APP 导出为 CSV。
 2. 他用 uomp import 把持仓导入本地 Memory Store。
 3. 他在 Registry 或本地目录发现 stock-analyst。
-4. 他用 uomp connect 验证这个 Agent 的身份和声明。
+4. 他用 uomp inspect 验证这个 Agent 的身份和声明。
 5. 他用 uomp authorize 授权 stock-analyst 读取持仓和风险偏好。
 6. CLI 给他一段 export UOM_TOKEN=... 命令。
 7. 小王把这段命令复制到**运行 Agent 的终端里**。
@@ -115,8 +131,8 @@ uomp revoke <session-id>
 |------|------|-------------------|
 | 导入持仓 CSV | 通用数据导入、字段映射、敏感度标记 | `uomp import` |
 | 发现 Agent | 从 Registry 或本地路径找到 Agent | `uomp discover` / `uomp registry search` |
-| 验证 Agent | 确认 Agent 身份、校验包完整性、评估风险 | `uomp connect` |
-| 授权 | 展示字段级数据暴露摘要、支持编辑/脱敏 | `uomp authorize` |
+| 验证 Agent | 确认 Agent 身份、校验包完整性、评估风险 | `uomp inspect` |
+| 授权 | 展示字段级数据暴露摘要、支持编辑/脱敏 | `uomp connect` / `uomp authorize` |
 | Token 交付 | 安全地把 Token 交给用户，不自动注入 | 终端打印 + `--output` |
 | Agent 读取私有数据 | Agent 用 Token 访问 Memory Guard | SDK `agent.memory.read` |
 | Agent 读取公开数据 | Agent 调用外部行情 API | SDK `agent.market.*` |
@@ -211,16 +227,25 @@ portfolio:holdings（8 条记录）
 | `uomp import <file>` | 导入任意私有数据到 Memory Store |
 | `uomp data` | 查看本地 Memory Store 中的数据 |
 | `uomp discover <path-or-registry>` | 发现 Agent，显示清单信息 |
-| `uomp connect <agent>` | 连接 Agent，验证身份，缓存清单，评估风险 |
-| `uomp authorize <agent>` | 创建 Session 并签发 Token |
+| `uomp setup <client>` | 一次性设置 MCP 客户端：导入 + 写配置 + 后台服务，不授权 |
+| `uomp connect <claude\|cursor\|opencode\|agent>` | 高级预授权：连接 MCP 客户端或 Agent 包，写配置/env 并启动服务 |
+| `uomp inspect <agent>` | 验证身份，缓存清单，评估风险 |
+| `uomp authorize <agent>` | 创建 Session 并签发 Token（手动/脚本 fallback） |
+| `uomp status` | 查看后台服务、活跃会话和客户端配置状态 |
+| `uomp start` | 后台启动 UOMP 服务 |
+| `uomp stop` | 停止后台 UOMP 服务 |
+| `uomp disconnect <client>` | 移除客户端配置并撤销对应会话 |
+| `uomp pending` | 查看待审批的按需授权请求 |
+| `uomp approve <request-id>` | 审批请求并写入会话 token |
+| `uomp deny <request-id>` | 拒绝请求并关闭会话 |
 | `uomp sessions` | 查看活跃会话 |
 | `uomp revoke <session-id>` | 撤销会话 |
 | `uomp audit` | 查看访问审计日志 |
 | `uomp config` | 配置默认偏好 |
 | `uomp dry-run <agent>` | 模拟授权，不读真实数据 |
 | `uomp registry search <keyword>` | 从 Registry 搜索 Agent |
-| `uomp gateway start` | 启动 Gateway（含 Cloudflare Tunnel 自动公网暴露） |
-| `uomp gateway status` | 查看 Gateway 运行状态 |
+
+> `uomp gateway` 已退役；远程 Agent 使用 Aegis Cloud + Aegis Memory Gateway。
 
 #### Agent Developer 命令
 
@@ -275,13 +300,13 @@ Agent: stock-analyst v0.1
 写入权限: 无
 ```
 
-#### 5.2.3 连接 Agent
+#### 5.2.3 检查 Agent
 
 ```bash
-$ uomp connect ./examples/stock-analyst
+$ uomp inspect ./examples/stock-analyst
 ```
 
-“连接”完成：
+“检查”完成：
 
 1. 读取并解析 `uom.json`。
 2. 验证发布者身份（DID / GPG / Registry）。
@@ -290,25 +315,26 @@ $ uomp connect ./examples/stock-analyst
 5. 给出风险评分。
 6. **不启动 Agent，不签发 Token**。
 
-#### 5.2.4 授权 Agent
+#### 5.2.4 连接并授权 Agent
 
 ```bash
-$ uomp authorize ./examples/stock-analyst
+$ uomp connect ./examples/stock-analyst --scope portfolio:holdings profile:risk --allow-high portfolio:holdings
 ```
 
-CLI 展示字段级数据暴露摘要，用户确认后创建 Session 并签发 Token：
+CLI 展示范围摘要，用户确认后创建 Session、签发 Token，并写入 `0600` 会话 env 文件（MCP 客户端会同时写客户端配置）：
 
 ```text
-已创建会话: sess_abc123
-已签发 Capability Token（有效期至 10:30）
+Session granted: sess_abc123
+  Scope     portfolio:holdings · profile:risk
+  Expires   2026-07-12 10:30 (30 min)
 
-请把以下环境变量设置到你运行 Agent 的终端中：
+Env file
+  /home/me/.uomp/sessions/sess_abc123.env
 
-  export UOM_TOKEN="eyJhbG..."
-  export UOMP_BASE_URL="http://127.0.0.1:9374"
-
-你可以随时运行 `uomp revoke sess_abc123` 撤销授权。
+Revoke with: uomp revoke sess_abc123
 ```
+
+Token 默认不打印到终端；需要时用 `--print-token`。
 
 #### 5.2.5 编辑范围与脱敏
 
@@ -487,8 +513,8 @@ uomp registry search stock
 uomp discover registry://stock-analyst
   -> 下载/使用缓存
   -> 校验 checksum + signature
-  -> uomp connect 完成验证
-  -> uomp authorize 授权
+  -> uomp inspect 完成验证
+  -> uomp connect 授权
 ```
 
 ### 7.4 验证层级
@@ -642,8 +668,8 @@ MVP 审计日志存在本地 SQLite。未来需要把审计事件直接记录到
 已实现能力：
 
 - CLI 支持 `discover`、`connect`、`authorize`、`sessions`、`revoke`、`audit`、`import`。
-- `authorize` 展示字段级数据暴露摘要；对高敏感 tag 自动收集 item key 完成 key 级授权。
-- Token 交付：终端打印 + `--output <file>`。
+- `authorize`/`connect` 展示数据暴露摘要；高敏感 tag 默认不选，选中后逐 key 确认，非交互模式需显式 `--allow-key` 或 `--allow-high`。
+- Token 交付：写入 `0600` 会话 env 文件；`--print-token` 才打印。
 - 本地 Registry 索引（`registry search/list/add/remove`）。
 - Agent Developer SDK（`UompAgent.fromEnv()`、`memory.readTag`、`memory.readKey`、`output.save`）。
 - 股票分析 Agent demo：导入 CSV/JSON → 授权 → 独立运行 → 生成本地 Markdown 报告。

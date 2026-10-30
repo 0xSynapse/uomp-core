@@ -35,7 +35,7 @@ node "$UOMP_DIR/packages/cli/dist/cli.js" discover "$UOMP_DIR/examples/stock-ana
 echo ""
 echo "==> Step 3: Local mode — authorize and run"
 node "$UOMP_DIR/packages/cli/dist/cli.js" authorize "$UOMP_DIR/examples/stock-analyst" \
-  --scope portfolio:holdings profile:risk --output /tmp/uomp-test.env --no-server
+  --scope portfolio:holdings profile:risk --allow-high portfolio:holdings --output /tmp/uomp-test.env --no-server
 
 source /tmp/uomp-test.env
 export UOMP_LANG=zh

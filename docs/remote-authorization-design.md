@@ -1,3 +1,5 @@
+> **已退役（2026-10）：** 独立 UOMP Gateway / Cloud Relay 不再维护。远程 Agent 运行时使用 Aegis Cloud，本地入口使用 Aegis Memory Gateway，审批与租约由 Aegis OS 执行。本文档保留为历史设计参考。
+
 # UOMP 远程授权设计文档
 
 > 状态：研究/预览。Phase 1 Gateway + mTLS 原型存在，但远程模式不是当前核心用户工作流；当前主线是本地 CLI + MCP。当前用法见 [README](../README.md#quick-start)。
@@ -142,7 +144,7 @@ uomp discover https://agent.example.com/uom.json
 **MVP 推荐 mTLS HTTPS**：
 
 - Agent 在 Registry 中注册其 TLS 客户端证书或证书指纹。
-- 用户端 `uomp connect` 时验证 Agent 证书与 Registry 记录一致。
+- 用户端 `uomp connect` / `uomp inspect` 时验证 Agent 身份与 Registry 记录一致。
 - 后续授权协商与 Token 交付都在该双向 TLS 通道内进行。
 
 ### 4.4 DIDComm 迁移路线

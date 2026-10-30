@@ -10,19 +10,35 @@ import { AuditCommands } from './commands/audit.js';
 import { AuthorizeCommands } from './commands/authorize.js';
 import { DiscoverCommands } from './commands/discover.js';
 import { ConnectCommands } from './commands/connect.js';
+import { InspectCommands } from './commands/inspect.js';
 import { ImportCommands } from './commands/import.js';
-import { GatewayCommands } from './commands/gateway.js';
 import { ServeCommands } from './commands/serve.js';
 import { McpCommands } from './commands/mcp.js';
 import { DemoCommands } from './commands/demo.js';
 import { DoctorCommands } from './commands/doctor.js';
+import { DisconnectCommands } from './commands/disconnect.js';
+import { PendingCommands } from './commands/pending.js';
+import { ApproveCommands } from './commands/approve.js';
+import { DenyCommands } from './commands/deny.js';
+import { StatusCommands } from './commands/status.js';
+import { StopCommands } from './commands/stop.js';
+import { StartCommands } from './commands/start.js';
+import { SetupCommands } from './commands/setup.js';
+import { StagedCommands } from './commands/staged.js';
+import { PayloadCommands } from './commands/payload.js';
+import { ApprovalsCommands } from './commands/approvals.js';
 import { parseHost, parsePort } from './utils/server.js';
+
+if (process.platform === 'win32') {
+  console.error('UOMP supports macOS and Linux only. Windows is not supported.');
+  process.exit(1);
+}
 
 const program = new Command();
 
 program
   .name('uomp')
-  .description('Give agents temporary, revocable access to your local notes and memory')
+  .description('UOMP reference CLI (product entry: aegis-os memory)')
   .version('0.0.1');
 
 program
@@ -67,19 +83,21 @@ program
   });
 
 program
-  .command('connect <agent>', { hidden: true })
-  .description('Connect to an agent: verify identity, checksum, and cache manifest')
+  .command('inspect <agent>', { hidden: true })
+  .description('Inspect an agent: verify identity, checksum, and cache manifest')
   .action(async (agent: string) => {
     const config = new UompConfig();
     await config.init();
-    const connect = new ConnectCommands(config);
-    await connect.connect(agent);
+    const inspector = new InspectCommands(config);
+    await inspector.inspect(agent);
   });
 
 program
   .command('authorize [agent]')
   .description('Authorize an agent, or a generic MCP client when no path is given')
-  .option('-s, --scope <scopes...>', 'Read tags to grant (skips the interactive prompt)')
+  .option('-s, --scope <scopes...>', 'Read tags to grant; high-sensitivity keys still need explicit approval')
+  .option('--allow-key <keys...>', 'Explicitly allow high-sensitivity keys (use with --scope)')
+  .option('--allow-high <tags...>', 'Explicitly allow all keys under named high-sensitivity tags')
   .option('-o, --output <file>', 'Write the session env file to a custom path')
   .option('-d, --duration <minutes>', 'Session duration in minutes (1-1440)', '30')
   .option('-p, --port <port>', 'Local server port (default: 9374)')
@@ -88,6 +106,8 @@ program
   .option('--no-server', 'Do not start the local Auth + Guard server')
   .action(async (agent: string | undefined, options: {
     scope?: string[];
+    allowKey?: string[];
+    allowHigh?: string[];
     output?: string;
     duration?: string;
     port?: string;
@@ -101,15 +121,35 @@ program
         host: options.host ? parseHost(options.host) : undefined,
       });
       const authorizer = new AuthorizeCommands(config);
-      await authorizer.authorize(agent, options);
+      await authorizer.authorize(agent, {
+        ...(options.scope ? { scope: options.scope } : {}),
+        ...(options.allowKey ? { allowKeys: options.allowKey } : {}),
+        ...(options.allowHigh ? { allowHigh: options.allowHigh } : {}),
+        ...(options.output ? { output: options.output } : {}),
+        ...(options.duration ? { duration: options.duration } : {}),
+        ...(options.printToken ? { printToken: true } : {}),
+        ...(options.server === false ? { server: false } : {}),
+      });
     } catch (error) {
       console.error(chalk.red(error instanceof Error ? error.message : String(error)));
       process.exitCode = 1;
     }
   });
 
+program.addCommand(ConnectCommands.get());
+program.addCommand(SetupCommands.get());
+program.addCommand(StagedCommands.get());
+program.addCommand(PayloadCommands.get());
+program.addCommand(ApprovalsCommands.get());
 program.addCommand(ServeCommands.get());
+program.addCommand(StartCommands.get());
 program.addCommand(McpCommands.get());
+program.addCommand(StatusCommands.get());
+program.addCommand(StopCommands.get());
+program.addCommand(DisconnectCommands.get());
+program.addCommand(PendingCommands.get());
+program.addCommand(ApproveCommands.get());
+program.addCommand(DenyCommands.get());
 
 program
   .command('sessions')
@@ -184,27 +224,44 @@ program
       await runner.run(agent, options.scope ?? []);
     }));
 
-program
-  .command('gateway', { hidden: true })
-  .description('Gateway management')
-  .addCommand(GatewayCommands.start())
-  .addCommand(GatewayCommands.status());
-
 program.addHelpText('after', `
-Core flow:
+Product entry:
+  $ aegis-os memory ...   (delegates to this reference CLI during migration)
+
+Fast path:
+  $ uomp setup claude --vault ~/Obsidian/MyVault
+  $ open Claude and ask it to read your notes
+  $ uomp status
+
+The first tool call opens the local UOMP approval page.
+
+Manual / pre-authorize:
+  $ uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+  $ uomp connect ./my-agent --scope notes/projects
+  $ uomp authorize --scope notes/projects --output ~/.uomp/sessions/client.env --no-server
+  $ uomp mcp --session ~/.uomp/sessions/client.env --print-config
+
+Manage access:
+  $ uomp revoke <session-id>
+  $ uomp staged list
+  $ uomp staged approve <staged-write-id>
+  $ uomp payload list
+  $ uomp payload get <payload-id>
+  $ uomp approvals
+  $ uomp disconnect claude
+  $ uomp stop
+
+On-demand consent:
+  $ uomp pending
+  $ uomp approve <request-id>
+  $ uomp deny <request-id>
+
+Optional:
   $ uomp demo
   $ uomp init
-  $ uomp import ~/Obsidian/MyVault
-  $ uomp authorize ./my-agent --scope notes/projects
-  $ uomp sessions
-
-Connect an MCP client (experimental):
-  $ uomp mcp --session <sessionId>
-
-Check your setup:
   $ uomp doctor
 
-Advanced commands (hidden): memory, registry, discover, connect, agent, gateway
+Advanced commands (hidden): memory, registry, discover, inspect, agent
 Run \`uomp help <command>\` for details.
 `);
 

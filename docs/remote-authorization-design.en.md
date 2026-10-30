@@ -1,3 +1,5 @@
+> **Retired (2026-10):** The standalone UOMP Gateway / Cloud Relay is no longer maintained. Remote Agents run on Aegis Cloud, the local entry point is Aegis Memory Gateway, and approval/leases are enforced by Aegis OS. This document is kept as historical design context.
+
 # UOMP Remote Authorization Design Document
 
 > Status: research/preview. A Phase 1 Gateway + mTLS prototype exists, but remote mode is not the current core user workflow; the current focus is the local CLI + MCP loop. See the [README](../README.md#quick-start) for current usage.
@@ -141,7 +143,7 @@ Security requirements:
 **MVP recommendation: mTLS HTTPS**:
 
 - The Agent registers its TLS client certificate or certificate fingerprint in the Registry.
-- When the user runs `uomp connect`, the client verifies that the Agent certificate matches the Registry record.
+- When the user runs `uomp connect` / `uomp inspect`, the client verifies that the Agent identity matches the Registry record.
 - Subsequent authorization negotiation and Token delivery take place within this mutually authenticated TLS channel.
 
 ### 4.4 DIDComm Migration Roadmap

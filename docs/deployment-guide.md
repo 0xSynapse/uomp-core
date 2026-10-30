@@ -1,6 +1,6 @@
 # UOMP 部署模式指南
 
-> **状态（2026-10）：** 当前主线是本地 CLI + MCP 闭环；远程 Gateway 属于高级或预览能力。日常本地使用请先看 [README Quick start](../README.md#quick-start)。
+> **状态（2026-10）：** 当前主线是本地 CLI + MCP 闭环。**远程 Gateway / Cloud Relay 已退役**：远程 Agent 使用 Aegis Cloud，本地入口使用 Aegis Memory Gateway。第 1 节仅保留为历史参考；本地部署请看第 2 节和 [README Quick start](../README.md#quick-start)。
 
 ## 概述
 
@@ -13,7 +13,7 @@ UOMP 当前支持两种部署模式：本地模式（推荐）和远程模式（
 
 ---
 
-## 1. CLI 远程模式（Gateway + Cloudflare Tunnel）
+## 1. CLI 远程模式（已退役，历史参考）
 
 Agent 运行在云服务 / 另一台机器上，通过 Gateway 回连用户本地 Memory Guard。
 
@@ -47,6 +47,7 @@ uomp import ./holdings.csv --tag portfolio:holdings --sensitivity high --replace
 # 4. 授权远程 Agent（本地 server 已在上一步启动）
 uomp authorize ./examples/stock-analyst \
   --scope portfolio:holdings profile:risk \
+  --allow-high portfolio:holdings \
   --output /tmp/uomp-remote.env \
   --no-server
 

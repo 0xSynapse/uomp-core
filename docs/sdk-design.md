@@ -2,6 +2,7 @@
 
 > 状态：当前以 Node.js `UompClient` 为主。Browser export、Wallet auth、StoreRouter 和写入流程已暂缓，不在当前路线图上。
 > 实现进度：`UompClient` 读取、聚合、审计等 Node.js 路径可用；浏览器/钱包部分保留为历史设计。
+> 远程访问：独立 Gateway / Cloud Relay 已退役；远程 Agent 使用 Aegis Cloud + Aegis Memory Gateway。
 
 ---
 

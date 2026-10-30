@@ -2,6 +2,7 @@
 
 > Status: the current SDK focus is the Node.js `UompClient`. Browser export, wallet auth, StoreRouter, and write flows are deferred and are not on the current roadmap.
 > Implementation: the Node.js read/aggregate/audit path is available; browser/wallet material is kept as historical design.
+> Remote access: the standalone Gateway / Cloud Relay is retired; remote Agents use Aegis Cloud + Aegis Memory Gateway.
 
 ---
 

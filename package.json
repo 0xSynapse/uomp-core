@@ -11,7 +11,8 @@
     "test": "pnpm build && node --test tests/integration/*.test.mjs",
     "test:integration": "node --test tests/integration/*.test.mjs",
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test:e2e": "node --test tests/e2e/*.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

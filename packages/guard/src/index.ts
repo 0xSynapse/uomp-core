@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
+import { timingSafeEqual } from 'crypto';
 import type { MemoryItem } from '@uomp/core';
 import { generateId } from '@uomp/core';
 import { MemoryStore, AsyncStoreAdapter } from '@uomp/store';
@@ -22,6 +23,7 @@ export interface GuardOptions {
   issuer: JWTTokenIssuer;
   store?: IMemoryStore;
   sessionStateProvider?: SessionStateProvider;
+  adminToken?: string;
 }
 
 export interface AuditLogEntry {
@@ -41,6 +43,7 @@ export class MemoryGuard {
   private store: IMemoryStore;
   private issuer: JWTTokenIssuer;
   private sessionStateProvider?: SessionStateProvider;
+  private adminToken?: string;
   private app: Hono;
 
   constructor(options: GuardOptions) {
@@ -48,6 +51,7 @@ export class MemoryGuard {
     this.store = options.store ?? new AsyncStoreAdapter(new MemoryStore({ dbPath: options.memoryDbPath }));
     this.issuer = options.issuer;
     this.sessionStateProvider = options.sessionStateProvider;
+    this.adminToken = options.adminToken;
     this.initSchema();
     this.app = this.createApp();
   }
@@ -71,11 +75,39 @@ export class MemoryGuard {
 
       CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_logs(session_id);
       CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp);
+
+      CREATE TABLE IF NOT EXISTS payloads (
+        payload_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        envelope TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_payloads_session ON payloads(session_id);
     `);
   }
 
   getApp(): Hono {
     return this.app;
+  }
+
+  private isAdmin(c: Context): boolean {
+    if (!this.adminToken) return false;
+    const provided = c.req.header('x-uomp-admin-token');
+    if (!provided) return false;
+    const expected = Buffer.from(this.adminToken);
+    const actual = Buffer.from(provided);
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  }
+
+  private requireAdmin(c: Context): Response | null {
+    if (!this.adminToken) {
+      return c.json({ error: { code: 'ADMIN_DISABLED', message: 'Admin approval is not configured' } }, 503);
+    }
+    if (!this.isAdmin(c)) {
+      return c.json({ error: { code: 'UNAUTHORIZED', message: 'Admin token required' } }, 401);
+    }
+    return null;
   }
 
   private createApp(): Hono {
@@ -235,16 +267,234 @@ export class MemoryGuard {
         );
       }
 
+      const body = await c.req.json().catch(() => null) as {
+        value?: unknown;
+        tags?: string[];
+        sensitivity?: 'low' | 'medium' | 'high';
+        description?: string;
+      } | null;
+      if (!body || body.value === undefined) {
+        return c.json({ error: { code: 'INVALID_REQUEST', message: 'value is required' } }, 400);
+      }
+
+      const tags = Array.isArray(body.tags) ? body.tags.filter((tag): tag is string => typeof tag === 'string') : [];
+      const sensitivity = body.sensitivity ?? 'medium';
+      const scope = validation.payload.scopes.write;
+      const keyAllowed = scope.keys.includes(key) && !scope.denyKeys.includes(key);
+      const tagAllowed = tags.some(tag => scope.tags.includes(tag) && !scope.denyTags.includes(tag));
+
+      if (sensitivity === 'high') {
+        this.logAudit({
+          sessionId: validation.payload.sessionId,
+          agentId: validation.payload.agentId,
+          action: 'write',
+          key,
+          tags,
+          allowed: false,
+          reason: 'HIGH_SENSITIVITY_WRITE_DENIED',
+        });
+        return c.json({ error: { code: 'HIGH_SENSITIVITY_WRITE_DENIED', message: 'Agent writes to high-sensitivity items are not allowed' } }, 403);
+      }
+
+      if (!keyAllowed && !tagAllowed) {
+        this.logAudit({
+          sessionId: validation.payload.sessionId,
+          agentId: validation.payload.agentId,
+          action: 'write',
+          key,
+          tags,
+          allowed: false,
+          reason: 'WRITE_OUTSIDE_SCOPE',
+        });
+        return c.json({ error: { code: 'ACCESS_DENIED', message: 'Write is outside the granted scope' } }, 403);
+      }
+
+      if (!this.store.stageWrite) {
+        return c.json({ error: { code: 'STAGING_UNAVAILABLE', message: 'This store does not support staged writes' } }, 501);
+      }
+
+      const staged = await this.store.stageWrite({
+        sessionId: validation.payload.sessionId,
+        agentId: validation.payload.agentId,
+        key,
+        value: body.value,
+        tags,
+        sensitivity,
+        ...(body.description ? { description: body.description } : {}),
+      });
+
       this.logAudit({
         sessionId: validation.payload.sessionId,
         agentId: validation.payload.agentId,
         action: 'write',
         key,
-        allowed: false,
-        reason: 'WRITE_NOT_AVAILABLE_IN_MVP',
+        tags,
+        allowed: true,
+        reason: 'STAGED_FOR_APPROVAL',
       });
 
-      return c.json({ error: { code: 'WRITE_NOT_AVAILABLE', message: 'Agent writes are not available in MVP', session_id: validation.sessionId } }, 503);
+      return c.json({
+        staged_write_id: staged.id,
+        status: staged.status,
+        approval_required: true,
+        session_id: validation.sessionId,
+      }, 202);
+    });
+
+    app.get('/v1/staged-writes', async c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+      if (!this.store.listStagedWrites) {
+        return c.json({ error: { code: 'STAGING_UNAVAILABLE', message: 'This store does not support staged writes' } }, 501);
+      }
+      const status = (c.req.query('status') ?? 'pending') as 'pending' | 'approved' | 'denied';
+      return c.json({ staged_writes: await this.store.listStagedWrites(status) });
+    });
+
+    app.post('/v1/staged-writes/:id/approve', async c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+      if (!this.store.approveStagedWrite) {
+        return c.json({ error: { code: 'STAGING_UNAVAILABLE', message: 'This store does not support staged writes' } }, 501);
+      }
+      const body = await c.req.json().catch(() => ({})) as { reviewed_by?: string };
+      const item = await this.store.approveStagedWrite(c.req.param('id'), body.reviewed_by ?? 'user');
+      if (!item) {
+        return c.json({ error: { code: 'STAGED_WRITE_NOT_FOUND', message: 'Staged write not found or not pending' } }, 404);
+      }
+      this.logAudit({
+        sessionId: 'admin',
+        agentId: body.reviewed_by ?? 'user',
+        action: 'write',
+        key: item.key,
+        tags: item.tags,
+        allowed: true,
+        reason: 'STAGED_WRITE_APPROVED',
+      });
+      return c.json({ status: 'approved', item });
+    });
+
+    app.post('/v1/staged-writes/:id/deny', async c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+      if (!this.store.denyStagedWrite) {
+        return c.json({ error: { code: 'STAGING_UNAVAILABLE', message: 'This store does not support staged writes' } }, 501);
+      }
+      const body = await c.req.json().catch(() => ({})) as { reviewed_by?: string };
+      const staged = await this.store.denyStagedWrite(c.req.param('id'), body.reviewed_by ?? 'user');
+      if (!staged) {
+        return c.json({ error: { code: 'STAGED_WRITE_NOT_FOUND', message: 'Staged write not found or not pending' } }, 404);
+      }
+      this.logAudit({
+        sessionId: 'admin',
+        agentId: body.reviewed_by ?? 'user',
+        action: 'write',
+        key: staged.key,
+        tags: staged.tags,
+        allowed: false,
+        reason: 'STAGED_WRITE_DENIED',
+      });
+      return c.json({ status: 'denied', staged_write: staged });
+    });
+
+    app.post('/v1/payload', async c => {
+      const authHeader = c.req.header('authorization');
+      const validation = await this.validateRequest(authHeader);
+      if (!validation.valid) {
+        return c.json(
+          { error: { code: validation.errorCode, message: validation.reason, session_id: validation.sessionId } },
+          this.statusForValidationError(validation.errorCode)
+        );
+      }
+
+      const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
+      if (!body || typeof body.ciphertext !== 'string' || body.ciphertext.length === 0) {
+        return c.json({ error: { code: 'INVALID_REQUEST', message: 'ciphertext is required' } }, 400);
+      }
+      if (!body.encryption || typeof body.encryption !== 'object') {
+        return c.json({ error: { code: 'INVALID_REQUEST', message: 'encryption metadata is required' } }, 400);
+      }
+      if (body.session_id && body.session_id !== validation.payload.sessionId) {
+        return c.json({ error: { code: 'SESSION_MISMATCH', message: 'payload session does not match token' } }, 403);
+      }
+      if (body.agent_id && body.agent_id !== validation.payload.agentId) {
+        return c.json({ error: { code: 'AGENT_MISMATCH', message: 'payload agent does not match token' } }, 403);
+      }
+
+      const payloadId = generateId('pay');
+      const envelope = {
+        ...body,
+        payload_id: payloadId,
+        session_id: validation.payload.sessionId,
+        agent_id: validation.payload.agentId,
+        timestamp: typeof body.timestamp === 'string' ? body.timestamp : new Date().toISOString(),
+      };
+      this.db.prepare(`
+        INSERT INTO payloads (payload_id, session_id, agent_id, envelope, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        payloadId,
+        validation.payload.sessionId,
+        validation.payload.agentId,
+        JSON.stringify(envelope),
+        new Date().toISOString(),
+      );
+
+      this.logAudit({
+        sessionId: validation.payload.sessionId,
+        agentId: validation.payload.agentId,
+        action: 'write',
+        allowed: true,
+        reason: 'PAYLOAD_STORED',
+      });
+
+      return c.json({ payload_id: payloadId, status: 'stored', session_id: validation.payload.sessionId }, 201);
+    });
+
+    app.get('/v1/payload/:id', async c => {
+      const row = this.db.prepare('SELECT * FROM payloads WHERE payload_id = ?')
+        .get(c.req.param('id')) as Record<string, string> | undefined;
+      if (!row) {
+        return c.json({ error: { code: 'PAYLOAD_NOT_FOUND', message: 'Payload not found' } }, 404);
+      }
+
+      const validation = await this.validateRequest(c.req.header('authorization'));
+      const admin = this.isAdmin(c);
+      if (!admin && (!validation.valid || row.session_id !== validation.payload.sessionId)) {
+        return c.json({ error: { code: 'ACCESS_DENIED', message: 'Payload belongs to another session' } }, 403);
+      }
+
+      return c.json(JSON.parse(row.envelope) as Record<string, unknown>);
+    });
+
+    app.get('/v1/payload', async c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+      const rows = this.db.prepare('SELECT * FROM payloads ORDER BY created_at DESC').all() as Record<string, string>[];
+      return c.json({
+        payloads: rows.map(row => {
+          const envelope = JSON.parse(row.envelope) as Record<string, unknown>;
+          return {
+            payload_id: row.payload_id,
+            session_id: row.session_id,
+            agent_id: row.agent_id,
+            created_at: row.created_at,
+            format: envelope.format,
+            size: envelope.size,
+            hash: envelope.hash,
+          };
+        }),
+      });
+    });
+
+    app.delete('/v1/payload/:id', async c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+      const result = this.db.prepare('DELETE FROM payloads WHERE payload_id = ?').run(c.req.param('id'));
+      if (result.changes === 0) {
+        return c.json({ error: { code: 'PAYLOAD_NOT_FOUND', message: 'Payload not found' } }, 404);
+      }
+      return c.json({ status: 'deleted', payload_id: c.req.param('id') });
     });
 
     app.delete('/v1/memory/:key', async c => {
