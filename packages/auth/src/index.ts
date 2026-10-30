@@ -988,6 +988,8 @@ export class AuthService {
       .run(new Date().toISOString(), requestId);
     this.closeSession(request.sessionId);
 
+    // Aegis escalations are left to expire; a future policy_deny_escalation
+    // tool will close them explicitly without granting a lease.
     return { ...request, status: 'denied' };
   }
 
