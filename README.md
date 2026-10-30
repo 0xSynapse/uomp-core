@@ -124,6 +124,8 @@ Without these variables, UOMP runs standalone with its local Auth + Guard. The a
 
 For remote Agents, run `aegis-os memory-gateway --public-key <jwk> --audience <url> --guard-url http://127.0.0.1:9374` behind a TLS 1.3 / mTLS terminator. It verifies the UOMP JWT and forwards scoped `/v1/memory` requests to the local Guard.
 
+The product entry point is `aegis-os memory ...`, which delegates to this reference CLI (`uomp`) during the migration. `uomp` remains the protocol reference/debug CLI.
+
 The remote path has an end-to-end test: `pnpm test:e2e` starts UOMP, mints a remote token, starts the Aegis gateway with mTLS, reads through it, and verifies scope denial and revocation. It requires `cargo build -p aos-cli` and `openssl`.
 
 ### What works today
@@ -487,6 +489,8 @@ export UOMP_AEGIS_AGENT=uomp
 不设置这些变量时，UOMP 仍按本地 Auth + Guard 独立运行。适配器在 [`packages/aegis-adapter`](./packages/aegis-adapter)，运行时映射在 [`aegis-os/crates/aos-memory`](https://github.com/heurion-org/aegis-os/tree/main/crates/aos-memory)。
 
 远程 Agent 使用 `aegis-os memory-gateway --public-key <jwk> --audience <url> --guard-url http://127.0.0.1:9374`，并在前面加 TLS 1.3 / mTLS 终止器。它会验证 UOMP JWT，并把带范围的 `/v1/memory` 请求转发给本地 Guard。
+
+产品入口是 `aegis-os memory ...`，迁移期委托给这个参考 CLI（`uomp`）。`uomp` 保留为协议参考/调试 CLI。
 
 远程路径有端到端测试：`pnpm test:e2e` 会启动 UOMP、签发 remote token、启动带 mTLS 的 Aegis Gateway、通过它读取，并验证 scope 拒绝和撤销。需要先执行 `cargo build -p aos-cli`，并安装 `openssl`。
 
