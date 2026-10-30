@@ -29,6 +29,7 @@ export interface AuthServiceOptions {
   adminToken: string;
   consentKeyResolver?: (tag: string) => ConsentKeyInfo[];
   consentKeyLookup?: (key: string) => ConsentKeyInfo | null;
+  aegis?: AegisConsentEvaluator;
 }
 
 export interface ConsentKeyInfo {
@@ -53,6 +54,20 @@ export interface ConsentRequest {
   expiresAt: string;
   approvedAt?: string;
   grantedScopes?: Scopes;
+  aegisEscalationIds?: string[];
+}
+
+/**
+ * Minimal interface implemented by `@uomp/aegis-adapter`. AuthService only
+ * needs evaluation and the trusted approval call; the concrete transport is
+ * injected by the CLI/server.
+ */
+export interface AegisConsentEvaluator {
+  evaluateScopes(scopes: Scopes): Promise<{
+    decision: 'allow' | 'ask' | 'deny';
+    escalationIds: string[];
+  }>;
+  approveEscalations(escalationIds: string[], ttlSecs: number): Promise<unknown[]>;
 }
 
 export interface CreateConsentRequestInput {
@@ -241,6 +256,7 @@ export class AuthService {
   private adminToken: string;
   private consentKeyResolver?: (tag: string) => ConsentKeyInfo[];
   private consentKeyLookup?: (key: string) => ConsentKeyInfo | null;
+  private aegis?: AegisConsentEvaluator;
   private consentTokens = new Map<string, { token: string; expiresAt: string; sessionId: string }>();
   private app: Hono;
 
@@ -251,6 +267,7 @@ export class AuthService {
     this.adminToken = options.adminToken;
     this.consentKeyResolver = options.consentKeyResolver;
     this.consentKeyLookup = options.consentKeyLookup;
+    this.aegis = options.aegis;
     this.initSchema();
     this.app = this.createApp();
   }
@@ -290,7 +307,8 @@ export class AuthService {
         created_at TEXT NOT NULL,
         expires_at TEXT NOT NULL,
         approved_at TEXT,
-        granted_scopes TEXT
+        granted_scopes TEXT,
+        aegis_escalations TEXT
       );
     `);
 
@@ -300,6 +318,9 @@ export class AuthService {
     }
     if (!consentColumns.some(column => column.name === 'secret_hash')) {
       this.db.exec('ALTER TABLE consent_requests ADD COLUMN secret_hash TEXT');
+    }
+    if (!consentColumns.some(column => column.name === 'aegis_escalations')) {
+      this.db.exec('ALTER TABLE consent_requests ADD COLUMN aegis_escalations TEXT');
     }
   }
 
@@ -467,7 +488,7 @@ export class AuthService {
         return c.json({ error: { code: 'INVALID_REQUEST', message: parsed.error.message } }, 400);
       }
 
-      const { request, secret } = this.createConsentRequest(parsed.data);
+      const { request, secret } = await this.createConsentRequestWithAegis(parsed.data);
       const origin = new URL(c.req.url).origin;
       return c.json({
         request_id: request.requestId,
@@ -699,6 +720,28 @@ export class AuthService {
   }
 
   createConsentRequest(data: CreateConsentRequestInput): { request: ConsentRequest; secret: string } {
+    return this.insertConsentRequest(data, []);
+  }
+
+  async createConsentRequestWithAegis(
+    data: CreateConsentRequestInput,
+  ): Promise<{ request: ConsentRequest; secret: string }> {
+    if (!this.aegis) {
+      return this.createConsentRequest(data);
+    }
+
+    const evaluation = await this.aegis.evaluateScopes(data.requested_scopes);
+    if (evaluation.decision === 'deny') {
+      throw new Error('Aegis denied the memory request.');
+    }
+
+    return this.insertConsentRequest(data, evaluation.escalationIds);
+  }
+
+  private insertConsentRequest(
+    data: CreateConsentRequestInput,
+    aegisEscalationIds: string[],
+  ): { request: ConsentRequest; secret: string } {
     const session = this.createSession({
       agent_id: data.agent_id,
       ...(data.agent_name ? { agent_name: data.agent_name } : {}),
@@ -714,8 +757,8 @@ export class AuthService {
     this.db.prepare(`
       INSERT INTO consent_requests (
         request_id, session_id, client, agent_id, agent_name, requested_scopes,
-        env_path, base_url, secret_hash, status, created_at, expires_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+        env_path, base_url, secret_hash, status, created_at, expires_at, aegis_escalations
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
     `).run(
       requestId,
       session.sessionId,
@@ -727,7 +770,8 @@ export class AuthService {
       data.base_url ?? null,
       secretHash,
       createdAt,
-      session.expiresAt
+      session.expiresAt,
+      aegisEscalationIds.length > 0 ? JSON.stringify(aegisEscalationIds) : null
     );
 
     return {
@@ -743,6 +787,9 @@ export class AuthService {
         status: 'pending',
         createdAt,
         expiresAt: session.expiresAt,
+        ...(aegisEscalationIds.length > 0
+          ? { aegisEscalationIds }
+          : {}),
       },
       secret,
     };
@@ -897,6 +944,14 @@ export class AuthService {
     const scopeError = validateConsentGrant(request.requestedScopes, grantedScopes);
     if (scopeError) {
       throw new Error(scopeError);
+    }
+
+    if (request.aegisEscalationIds?.length && this.aegis) {
+      const ttlSecs = Math.max(
+        1,
+        Math.floor((Date.parse(request.expiresAt) - Date.now()) / 1000),
+      );
+      await this.aegis.approveEscalations(request.aegisEscalationIds, ttlSecs);
     }
 
     const result = await this.grantSession(request.sessionId, grantedScopes);
@@ -1094,6 +1149,9 @@ export class AuthService {
       expiresAt: row.expires_at,
       ...(row.approved_at ? { approvedAt: row.approved_at } : {}),
       ...(row.granted_scopes ? { grantedScopes: JSON.parse(row.granted_scopes) as Scopes } : {}),
+      ...(row.aegis_escalations
+        ? { aegisEscalationIds: JSON.parse(row.aegis_escalations) as string[] }
+        : {}),
     };
   }
 

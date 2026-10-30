@@ -109,6 +109,19 @@ Design principles:
 - **Auditable.** Every access decision is logged.
 - **Interoperable.** UOMP is a layer over existing memory sources, not a new silo.
 
+### Aegis OS integration (optional)
+
+UOMP can delegate memory policy evaluation to Aegis OS. When configured, the Auth Service calls Aegis `memory_policy_evaluate`; an `ask` becomes a UOMP consent request, and approval calls `policy_approve_escalation` before the UOMP token is issued.
+
+```bash
+export UOMP_AEGIS_MCP_URL=http://127.0.0.1:7080/mcp
+export UOMP_AEGIS_TOKEN=...   # trusted operator token; never put this in an Agent env
+export UOMP_AEGIS_ORG=local
+export UOMP_AEGIS_AGENT=uomp
+```
+
+Without these variables, UOMP runs standalone with its local Auth + Guard. The adapter is in [`packages/aegis-adapter`](./packages/aegis-adapter) and the runtime mapping is in [`aegis-os/crates/aos-memory`](https://github.com/heurion-org/aegis-os/tree/main/crates/aos-memory).
+
 ### What works today
 
 | Capability | Status |
@@ -452,6 +465,19 @@ Memory Guard ── 校验会话状态、范围、过期时间、是否已撤销
 - **会话绑定。** Token 会过期；`revoke` / `close` 在下一个请求立即生效。
 - **可审计。** 每次访问决策都有日志。
 - **可互操作。** UOMP 是已有记忆源之上的一层，不是新的数据孤岛。
+
+### Aegis OS 集成（可选）
+
+UOMP 可以把记忆策略评估委托给 Aegis OS。配置后，Auth Service 会调用 Aegis 的 `memory_policy_evaluate`；返回 `ask` 时创建 UOMP 审批请求，批准时先调用 `policy_approve_escalation`，再签发 UOMP token。
+
+```bash
+export UOMP_AEGIS_MCP_URL=http://127.0.0.1:7080/mcp
+export UOMP_AEGIS_TOKEN=...   # 可信 operator token；不要放进 Agent 环境
+export UOMP_AEGIS_ORG=local
+export UOMP_AEGIS_AGENT=uomp
+```
+
+不设置这些变量时，UOMP 仍按本地 Auth + Guard 独立运行。适配器在 [`packages/aegis-adapter`](./packages/aegis-adapter)，运行时映射在 [`aegis-os/crates/aos-memory`](https://github.com/heurion-org/aegis-os/tree/main/crates/aos-memory)。
 
 ### 今天已经可用
 

@@ -10,6 +10,7 @@
   "references": [
     { "path": "../../packages/core" },
     { "path": "../../packages/auth" },
+    { "path": "../../packages/aegis-adapter" },
     { "path": "../../packages/guard" },
     { "path": "../../packages/token" }
   ]

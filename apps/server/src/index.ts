@@ -4,6 +4,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { DEFAULT_HOST, DEFAULT_PORT, DATA_DIR_NAME, SECRETS_DIR_NAME } from '@uomp/core';
 import { AuthService, loadOrCreateAdminToken } from '@uomp/auth';
+import { AegisConsentBridge, HttpAegisMcpClient } from '@uomp/aegis-adapter';
 import { MemoryGuard } from '@uomp/guard';
 import { MemoryStore } from '@uomp/store';
 import { JWTTokenIssuer } from '@uomp/token';
@@ -23,10 +24,22 @@ async function main() {
 
   const adminToken = loadOrCreateAdminToken(secretsDir);
 
+  const aegisEndpoint = process.env.UOMP_AEGIS_MCP_URL;
+  const aegisToken = process.env.UOMP_AEGIS_TOKEN;
+  const aegis = aegisEndpoint && aegisToken
+    ? new AegisConsentBridge(new HttpAegisMcpClient({
+        endpoint: aegisEndpoint,
+        token: aegisToken,
+        orgId: process.env.UOMP_AEGIS_ORG ?? 'local',
+        agentId: process.env.UOMP_AEGIS_AGENT ?? 'uomp',
+      }))
+    : undefined;
+
   const authService = new AuthService({
     dbPath: authDbPath,
     issuer,
     adminToken,
+    aegis,
     consentKeyResolver: (tag: string) => {
       const store = new MemoryStore({ dbPath: memoryDbPath });
       try {
