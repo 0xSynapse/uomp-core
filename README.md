@@ -148,7 +148,7 @@ The remote path has an end-to-end test: `pnpm test:e2e` starts UOMP, mints a rem
 | Remote access | Aegis Cloud remote Agent + Aegis Memory Gateway (optional; standalone gateway/relay retired) |
 | SDK | TypeScript (`@uomp/sdk`) |
 | Examples | Calendar agent and stock analyst |
-| Writes | Not available in the MVP; writes return `503` |
+| Writes | Staged in SQLite; `uomp staged list/approve/deny`; high-sensitivity writes rejected |
 | Admin operations | Session create/grant/revoke require a local admin token |
 
 ### What we are building next
@@ -509,7 +509,7 @@ export UOMP_AEGIS_AGENT=uomp
 | 远程访问 | Aegis Cloud 远程 Agent + Aegis Memory Gateway（可选；独立 gateway/relay 已退役） |
 | SDK | TypeScript（`@uomp/sdk`） |
 | 示例 | Calendar Agent、Stock Analyst |
-| 写入 | MVP 不支持，写入返回 `503` |
+| 写入 | SQLite staging；`uomp staged list/approve/deny`；高敏写入拒绝 |
 | 管理员操作 | create/grant/revoke 需要本机管理员令牌 |
 
 ### 下一步做什么

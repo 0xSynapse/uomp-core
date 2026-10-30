@@ -566,8 +566,11 @@ Auth Service MUST 校验 `session_id` 与路径一致，并记录审计日志。
 | GET | `/v1/memory/aggregate?tag=:tag&op=:op&field=:field` | 聚合查询（sum/avg/count/min/max），不返回原始数据，见 §10.5 |
 | GET | `/v1/audit` | 查询审计日志，见 §18 |
 | POST | `/v1/memory/query` | 语义查询（未来扩展） |
-| PUT | `/v1/memory/:key` | 写入或更新（MVP 返回 `WRITE_NOT_AVAILABLE`） |
+| PUT | `/v1/memory/:key` | 暂存写入；返回 `202` + `staged_write_id`，用户批准后生效 |
 | DELETE | `/v1/memory/:key` | 删除（MVP 返回 `WRITE_NOT_AVAILABLE`） |
+| GET | `/v1/staged-writes` | 列出待审批写入（管理员） |
+| POST | `/v1/staged-writes/:id/approve` | 批准并应用暂存写入（管理员） |
+| POST | `/v1/staged-writes/:id/deny` | 拒绝暂存写入（管理员） |
 
 ### 10.2 Read by Key
 
@@ -701,8 +704,8 @@ Guard MUST 先校验该 tag 的访问授权（与普通 tag 查询一致），�
 ### 11.3 Sensitivity Rules
 
 - `sensitivity=high` 的 Memory Item 不能通过 tag 授权访问。
-- Agent 在 MVP 阶段 MUST NOT 写入任何 Memory Item。
-- Milestone 2 引入 Staging 写入后，Agent 写入高敏感项仍 MUST 被拒绝。
+- Agent 写入 MUST 进入 Staging，用户批准后生效。
+- Agent 写入高敏感项 MUST 被拒绝。
 
 ## 12. Memory Import Format
 
@@ -1320,9 +1323,10 @@ Auth Service 或 Gateway 收到后：
 
 ### 20.4 Agent Write Restrictions
 
-- MVP 阶段 Agent MUST NOT 写入 Memory。
-- Milestone 2 引入 Staging 写入后，Agent 写入 MUST 经用户确认才生效。
+- Agent 写入 MUST 先进入 Staging，用户确认后才生效。
+- Agent MUST NOT 直接修改 Memory Store。
 - Agent MUST NOT 写入 `sensitivity=high` 的 Memory Item。
+- 暂存写入 MUST 记录发起 Agent、Session、范围、时间和审批人。
 
 ## 21. Privacy Considerations
 
@@ -1334,7 +1338,6 @@ Auth Service 或 Gateway 收到后：
 ## 22. Future Work
 
 - 链上审计（Phase 4）：Starknet `AuditAnchor` 合约，Authorization / Revocation / Access 事件上链。
-- Agent 写入 Staging 机制。
 - **FHE 集成（Phase 7-9）**：全同态加密。Agent 在密文上计算，永远看不到明文。结合链上审计实现 trustless 数据授权闭环。详见 `docs/on-chain-audit-design.md` §10。
 - 语义检索（`query` 接口）。
 - 写入版本历史与回滚。

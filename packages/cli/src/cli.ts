@@ -24,6 +24,7 @@ import { StatusCommands } from './commands/status.js';
 import { StopCommands } from './commands/stop.js';
 import { StartCommands } from './commands/start.js';
 import { SetupCommands } from './commands/setup.js';
+import { StagedCommands } from './commands/staged.js';
 import { parseHost, parsePort } from './utils/server.js';
 
 if (process.platform === 'win32') {
@@ -135,6 +136,7 @@ program
 
 program.addCommand(ConnectCommands.get());
 program.addCommand(SetupCommands.get());
+program.addCommand(StagedCommands.get());
 program.addCommand(ServeCommands.get());
 program.addCommand(StartCommands.get());
 program.addCommand(McpCommands.get());
@@ -234,6 +236,8 @@ Manual / pre-authorize:
 
 Manage access:
   $ uomp revoke <session-id>
+  $ uomp staged list
+  $ uomp staged approve <staged-write-id>
   $ uomp disconnect claude
   $ uomp stop
 

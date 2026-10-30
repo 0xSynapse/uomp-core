@@ -79,6 +79,7 @@ async function main() {
     memoryDbPath,
     issuer,
     sessionStateProvider: authService,
+    adminToken,
   });
 
   const authApp = authService.getApp();

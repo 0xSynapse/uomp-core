@@ -52,18 +52,21 @@ async function jsonRequest(url, options = {}) {
   return body;
 }
 
-function httpsRequest({ port, path, token, ca, cert, key }) {
+function httpsRequest({ port, path, token, ca, cert, key, method = 'GET', body }) {
   return new Promise((resolveRequest, reject) => {
     const request = https.request({
       host: '127.0.0.1',
       port,
       path,
-      method: 'GET',
+      method,
       ca,
       cert,
       key,
       servername: 'localhost',
-      headers: { authorization: `Bearer ${token}` },
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(body ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } : {}),
+      },
     }, (response) => {
       let body = '';
       response.setEncoding('utf-8');
@@ -71,6 +74,7 @@ function httpsRequest({ port, path, token, ca, cert, key }) {
       response.on('end', () => resolveRequest({ status: response.statusCode, body }));
     });
     request.on('error', reject);
+    if (body) request.write(body);
     request.end();
   });
 }
@@ -155,7 +159,7 @@ test('remote Agent reaches local Guard through the mTLS Aegis Memory Gateway', {
   const publicJwk = join(dataDir, '.secrets', 'ed25519-public.jwk');
   const adminHeaders = { 'content-type': 'application/json', 'x-uomp-admin-token': adminToken };
   const readScope = { tags: ['notes/projects'], keys: [], denyTags: [], denyKeys: [] };
-  const writeScope = { tags: [], keys: [], denyTags: [], denyKeys: [] };
+  const writeScope = { tags: [], keys: ['note.projects.plan'], denyTags: [], denyKeys: [] };
   const scopes = { read: readScope, write: writeScope };
 
   const session = await jsonRequest(`${base}/v1/sessions`, {
@@ -232,6 +236,41 @@ test('remote Agent reaches local Guard through the mTLS Aegis Memory Gateway', {
     key: certs.clientKey,
   });
   assert.equal(denied.status, 403, denied.body);
+
+  const staged = await httpsRequest({
+    port: gatewayPort,
+    path: '/v1/memory/note.projects.plan',
+    token: grant.token,
+    ca: certs.ca,
+    cert: certs.clientCert,
+    key: certs.clientKey,
+    method: 'PUT',
+    body: JSON.stringify({
+      value: { title: 'Plan', body: 'Ship it twice.' },
+      tags: ['notes/projects'],
+      sensitivity: 'low',
+    }),
+  });
+  assert.equal(staged.status, 202, staged.body);
+  const stagedBody = JSON.parse(staged.body);
+  assert.equal(stagedBody.status, 'pending');
+
+  await jsonRequest(`${base}/v1/staged-writes/${stagedBody.staged_write_id}/approve`, {
+    method: 'POST',
+    headers: adminHeaders,
+    body: JSON.stringify({ reviewed_by: 'e2e' }),
+  });
+
+  const updated = await httpsRequest({
+    port: gatewayPort,
+    path: '/v1/memory?tag=notes/projects',
+    token: grant.token,
+    ca: certs.ca,
+    cert: certs.clientCert,
+    key: certs.clientKey,
+  });
+  assert.equal(updated.status, 200, updated.body);
+  assert.match(updated.body, /Ship it twice/);
 
   await jsonRequest(`${base}/v1/sessions/${session.session_id}/revoke`, {
     method: 'POST',

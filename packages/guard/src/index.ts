@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
+import { timingSafeEqual } from 'crypto';
 import type { MemoryItem } from '@uomp/core';
 import { generateId } from '@uomp/core';
 import { MemoryStore, AsyncStoreAdapter } from '@uomp/store';
@@ -22,6 +23,7 @@ export interface GuardOptions {
   issuer: JWTTokenIssuer;
   store?: IMemoryStore;
   sessionStateProvider?: SessionStateProvider;
+  adminToken?: string;
 }
 
 export interface AuditLogEntry {
@@ -41,6 +43,7 @@ export class MemoryGuard {
   private store: IMemoryStore;
   private issuer: JWTTokenIssuer;
   private sessionStateProvider?: SessionStateProvider;
+  private adminToken?: string;
   private app: Hono;
 
   constructor(options: GuardOptions) {
@@ -48,6 +51,7 @@ export class MemoryGuard {
     this.store = options.store ?? new AsyncStoreAdapter(new MemoryStore({ dbPath: options.memoryDbPath }));
     this.issuer = options.issuer;
     this.sessionStateProvider = options.sessionStateProvider;
+    this.adminToken = options.adminToken;
     this.initSchema();
     this.app = this.createApp();
   }
@@ -76,6 +80,22 @@ export class MemoryGuard {
 
   getApp(): Hono {
     return this.app;
+  }
+
+  private requireAdmin(c: Context): Response | null {
+    if (!this.adminToken) {
+      return c.json({ error: { code: 'ADMIN_DISABLED', message: 'Staged-write approval is not configured' } }, 503);
+    }
+    const provided = c.req.header('x-uomp-admin-token');
+    if (!provided) {
+      return c.json({ error: { code: 'UNAUTHORIZED', message: 'Admin token required' } }, 401);
+    }
+    const expected = Buffer.from(this.adminToken);
+    const actual = Buffer.from(provided);
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+      return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid admin token' } }, 401);
+    }
+    return null;
   }
 
   private createApp(): Hono {
@@ -235,16 +255,134 @@ export class MemoryGuard {
         );
       }
 
+      const body = await c.req.json().catch(() => null) as {
+        value?: unknown;
+        tags?: string[];
+        sensitivity?: 'low' | 'medium' | 'high';
+        description?: string;
+      } | null;
+      if (!body || body.value === undefined) {
+        return c.json({ error: { code: 'INVALID_REQUEST', message: 'value is required' } }, 400);
+      }
+
+      const tags = Array.isArray(body.tags) ? body.tags.filter((tag): tag is string => typeof tag === 'string') : [];
+      const sensitivity = body.sensitivity ?? 'medium';
+      const scope = validation.payload.scopes.write;
+      const keyAllowed = scope.keys.includes(key) && !scope.denyKeys.includes(key);
+      const tagAllowed = tags.some(tag => scope.tags.includes(tag) && !scope.denyTags.includes(tag));
+
+      if (sensitivity === 'high') {
+        this.logAudit({
+          sessionId: validation.payload.sessionId,
+          agentId: validation.payload.agentId,
+          action: 'write',
+          key,
+          tags,
+          allowed: false,
+          reason: 'HIGH_SENSITIVITY_WRITE_DENIED',
+        });
+        return c.json({ error: { code: 'HIGH_SENSITIVITY_WRITE_DENIED', message: 'Agent writes to high-sensitivity items are not allowed' } }, 403);
+      }
+
+      if (!keyAllowed && !tagAllowed) {
+        this.logAudit({
+          sessionId: validation.payload.sessionId,
+          agentId: validation.payload.agentId,
+          action: 'write',
+          key,
+          tags,
+          allowed: false,
+          reason: 'WRITE_OUTSIDE_SCOPE',
+        });
+        return c.json({ error: { code: 'ACCESS_DENIED', message: 'Write is outside the granted scope' } }, 403);
+      }
+
+      if (!this.store.stageWrite) {
+        return c.json({ error: { code: 'STAGING_UNAVAILABLE', message: 'This store does not support staged writes' } }, 501);
+      }
+
+      const staged = await this.store.stageWrite({
+        sessionId: validation.payload.sessionId,
+        agentId: validation.payload.agentId,
+        key,
+        value: body.value,
+        tags,
+        sensitivity,
+        ...(body.description ? { description: body.description } : {}),
+      });
+
       this.logAudit({
         sessionId: validation.payload.sessionId,
         agentId: validation.payload.agentId,
         action: 'write',
         key,
-        allowed: false,
-        reason: 'WRITE_NOT_AVAILABLE_IN_MVP',
+        tags,
+        allowed: true,
+        reason: 'STAGED_FOR_APPROVAL',
       });
 
-      return c.json({ error: { code: 'WRITE_NOT_AVAILABLE', message: 'Agent writes are not available in MVP', session_id: validation.sessionId } }, 503);
+      return c.json({
+        staged_write_id: staged.id,
+        status: staged.status,
+        approval_required: true,
+        session_id: validation.sessionId,
+      }, 202);
+    });
+
+    app.get('/v1/staged-writes', async c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+      if (!this.store.listStagedWrites) {
+        return c.json({ error: { code: 'STAGING_UNAVAILABLE', message: 'This store does not support staged writes' } }, 501);
+      }
+      const status = (c.req.query('status') ?? 'pending') as 'pending' | 'approved' | 'denied';
+      return c.json({ staged_writes: await this.store.listStagedWrites(status) });
+    });
+
+    app.post('/v1/staged-writes/:id/approve', async c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+      if (!this.store.approveStagedWrite) {
+        return c.json({ error: { code: 'STAGING_UNAVAILABLE', message: 'This store does not support staged writes' } }, 501);
+      }
+      const body = await c.req.json().catch(() => ({})) as { reviewed_by?: string };
+      const item = await this.store.approveStagedWrite(c.req.param('id'), body.reviewed_by ?? 'user');
+      if (!item) {
+        return c.json({ error: { code: 'STAGED_WRITE_NOT_FOUND', message: 'Staged write not found or not pending' } }, 404);
+      }
+      this.logAudit({
+        sessionId: 'admin',
+        agentId: body.reviewed_by ?? 'user',
+        action: 'write',
+        key: item.key,
+        tags: item.tags,
+        allowed: true,
+        reason: 'STAGED_WRITE_APPROVED',
+      });
+      return c.json({ status: 'approved', item });
+    });
+
+    app.post('/v1/staged-writes/:id/deny', async c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+      if (!this.store.denyStagedWrite) {
+        return c.json({ error: { code: 'STAGING_UNAVAILABLE', message: 'This store does not support staged writes' } }, 501);
+      }
+      const body = await c.req.json().catch(() => ({})) as { reviewed_by?: string };
+      const staged = await this.store.denyStagedWrite(c.req.param('id'), body.reviewed_by ?? 'user');
+      if (!staged) {
+        return c.json({ error: { code: 'STAGED_WRITE_NOT_FOUND', message: 'Staged write not found or not pending' } }, 404);
+      }
+      this.logAudit({
+        sessionId: 'admin',
+        agentId: body.reviewed_by ?? 'user',
+        action: 'write',
+        key: staged.key,
+        tags: staged.tags,
+        allowed: false,
+        reason: 'STAGED_WRITE_DENIED',
+      });
+      return c.json({ status: 'denied', staged_write: staged });
     });
 
     app.delete('/v1/memory/:key', async c => {
