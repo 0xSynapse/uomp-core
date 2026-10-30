@@ -122,6 +122,8 @@ export UOMP_AEGIS_AGENT=uomp
 
 Without these variables, UOMP runs standalone with its local Auth + Guard. The adapter is in [`packages/aegis-adapter`](./packages/aegis-adapter) and the runtime mapping is in [`aegis-os/crates/aos-memory`](https://github.com/heurion-org/aegis-os/tree/main/crates/aos-memory).
 
+For remote Agents, run `aegis-os memory-gateway --public-key <jwk> --audience <url> --guard-url http://127.0.0.1:9374` behind a TLS 1.3 / mTLS terminator. It verifies the UOMP JWT and forwards scoped `/v1/memory` requests to the local Guard.
+
 ### What works today
 
 | Capability | Status |
@@ -478,6 +480,8 @@ export UOMP_AEGIS_AGENT=uomp
 ```
 
 不设置这些变量时，UOMP 仍按本地 Auth + Guard 独立运行。适配器在 [`packages/aegis-adapter`](./packages/aegis-adapter)，运行时映射在 [`aegis-os/crates/aos-memory`](https://github.com/heurion-org/aegis-os/tree/main/crates/aos-memory)。
+
+远程 Agent 使用 `aegis-os memory-gateway --public-key <jwk> --audience <url> --guard-url http://127.0.0.1:9374`，并在前面加 TLS 1.3 / mTLS 终止器。它会验证 UOMP JWT，并把带范围的 `/v1/memory` 请求转发给本地 Guard。
 
 ### 今天已经可用
 
