@@ -68,7 +68,7 @@ test('help shows the core flow and hides advanced commands', () => {
     const result = runCli(home, ['--help']);
     assert.equal(result.status, 0, result.stderr);
 
-    for (const command of ['init', 'import', 'authorize', 'connect', 'serve', 'start', 'status', 'stop', 'disconnect', 'pending', 'approve', 'deny', 'sessions', 'revoke', 'audit']) {
+    for (const command of ['init', 'import', 'authorize', 'connect', 'setup', 'serve', 'start', 'status', 'stop', 'disconnect', 'pending', 'approve', 'deny', 'sessions', 'revoke', 'audit']) {
       assert.match(result.stdout, new RegExp(`^\\s{2}${command}(?:\\s|$)`, 'm'));
     }
 
@@ -77,7 +77,7 @@ test('help shows the core flow and hides advanced commands', () => {
     }
 
     assert.match(result.stdout, /Advanced commands \(hidden\)/);
-    assert.match(result.stdout, /Core flow:/);
+    assert.match(result.stdout, /Fast path:/);
 
     const hidden = runCli(home, ['memory', 'list']);
     assert.equal(hidden.status, 0, hidden.stderr);

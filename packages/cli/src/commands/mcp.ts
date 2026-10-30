@@ -12,6 +12,7 @@ import {
 import { clientLabel, parseMcpClient, printClientConfig, type ConnectClient } from '../utils/mcp-config.js';
 import { writeSessionEnvFile } from '../utils/session-env-file.js';
 import { notifyConsentRequest } from '../utils/notify.js';
+import type { Scopes } from '@uomp/core';
 
 interface McpOptions {
   session?: string;
@@ -133,6 +134,7 @@ export class McpCommands {
   private pendingRequestId?: string;
   private pendingSecret?: string;
   private pendingApprovalUrl?: string;
+  private pendingScopes?: Scopes;
   private noOpen = false;
   private notify = true;
   private consentTimeoutSeconds = 90;
@@ -297,23 +299,31 @@ export class McpCommands {
     }
   }
 
-  private async ensureCredentials(): Promise<boolean> {
+  private async ensureCredentials(requestedScopes: Scopes): Promise<boolean> {
     if (this.pendingRequestId) {
       if (await this.tryLoadCredentials()) {
-        this.pendingRequestId = undefined;
-        return true;
+        if (this.tokenCoversScope(this.credentials!.token, requestedScopes)) {
+          this.clearPendingRequest();
+          return true;
+        }
       }
 
       const status = await this.pendingRequestStatus();
       if (status === 'denied' || status === 'expired') {
-        this.pendingRequestId = undefined;
-        await this.requestConsent();
+        this.clearPendingRequest();
+        return this.requestConsent(requestedScopes);
       }
       return false;
     }
 
     if (this.credentials) {
-      if (!this.onDemand || await this.tokenIsValid(this.credentials)) {
+      if (!this.onDemand) {
+        return true;
+      }
+      if (
+        await this.tokenIsValid(this.credentials)
+        && this.tokenCoversScope(this.credentials.token, requestedScopes)
+      ) {
         return true;
       }
       this.credentials = undefined;
@@ -323,7 +333,36 @@ export class McpCommands {
       return false;
     }
 
-    return this.requestConsent();
+    return this.requestConsent(requestedScopes);
+  }
+
+  private clearPendingRequest(): void {
+    this.pendingRequestId = undefined;
+    this.pendingApprovalUrl = undefined;
+    this.pendingSecret = undefined;
+    this.pendingScopes = undefined;
+  }
+
+  private tokenCoversScope(token: string, requestedScopes: Scopes): boolean {
+    const tags = requestedScopes.read.tags;
+    const keys = requestedScopes.read.keys;
+    if (tags.length === 0 && keys.length === 0) return true;
+
+    try {
+      const payload = JSON.parse(
+        Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf-8')
+      ) as { scopes?: Scopes };
+      const granted = payload.scopes?.read;
+      if (!granted) return false;
+      const tagsCovered = tags.every(tag => granted.tags.includes(tag));
+      const keysCovered = keys.every(key => granted.keys.includes(key));
+      // A tag-scoped token may still read keys under that tag; Guard enforces
+      // the actual tag/key match. Avoid prompting again for every key read.
+      const tagScopeCoversKeys = keys.length > 0 && granted.tags.length > 0;
+      return tagsCovered && (keysCovered || tagScopeCoversKeys);
+    } catch {
+      return false;
+    }
   }
 
   private async tryLoadCredentials(): Promise<boolean> {
@@ -375,9 +414,13 @@ export class McpCommands {
     }
   }
 
-  private async requestConsent(): Promise<boolean> {
-    if (this.requestScopes.length === 0) {
-      throw new Error('--on-demand requires --request-scope <tag...>.');
+  private async requestConsent(requestedScopes: Scopes): Promise<boolean> {
+    const scopes = this.requestScopes.length > 0
+      ? scopesFromTags(this.requestScopes)
+      : requestedScopes;
+
+    if (scopes.read.tags.length === 0 && scopes.read.keys.length === 0) {
+      throw new Error('No readable scope was requested by this tool call.');
     }
 
     await this.config.init();
@@ -397,10 +440,7 @@ export class McpCommands {
         client,
         agent_id: client === 'mcp-client' ? 'mcp-client' : `mcp-client-${client}`,
         agent_name: agentName,
-        requested_scopes: {
-          read: { tags: this.requestScopes, keys: [], denyTags: [], denyKeys: [] },
-          write: { tags: [], keys: [], denyTags: [], denyKeys: [] },
-        },
+        requested_scopes: scopes,
         duration_minutes: this.requestDuration,
         env_path: envPath,
         base_url: this.connectionUrl(),
@@ -425,6 +465,12 @@ export class McpCommands {
 
     this.pendingRequestId = body.request_id;
     this.pendingApprovalUrl = body.approval_url;
+    this.pendingScopes = scopes;
+
+    const scopeSummary = [
+      ...scopes.read.tags,
+      ...scopes.read.keys,
+    ].join(', ');
 
     if (body.approval_url) {
       const parsed = new URL(body.approval_url);
@@ -435,7 +481,7 @@ export class McpCommands {
       if (this.notify) {
         notifyConsentRequest({
           title: 'UOMP approval required',
-          body: `${agentName} requests ${this.requestScopes.join(', ')}`,
+          body: `${agentName} requests ${scopeSummary}`,
           url: body.approval_url,
         });
       }
@@ -446,9 +492,7 @@ export class McpCommands {
 
     const approved = await this.waitForConsentApproval();
     if (approved) {
-      this.pendingRequestId = undefined;
-      this.pendingApprovalUrl = undefined;
-      this.pendingSecret = undefined;
+      this.clearPendingRequest();
     }
     return approved;
   }
@@ -537,13 +581,41 @@ export class McpCommands {
     return 'No UOMP session. Run `uomp approve <request-id>` after a pending request, or re-run `uomp connect`.';
   }
 
+  private requestedScopesForTool(name: string, args: Record<string, unknown>): Scopes {
+    const empty: Scopes = {
+      read: { tags: [], keys: [], denyTags: [], denyKeys: [] },
+      write: { tags: [], keys: [], denyTags: [], denyKeys: [] },
+    };
+
+    if (name === 'list_memory' || name === 'search_memory') {
+      const tag = typeof args.tag === 'string' ? args.tag.trim() : '';
+      if (!tag) return empty;
+      return {
+        ...empty,
+        read: { ...empty.read, tags: [tag] },
+      };
+    }
+
+    if (name === 'read_memory') {
+      const key = typeof args.key === 'string' ? args.key.trim() : '';
+      if (!key) return empty;
+      return {
+        ...empty,
+        read: { ...empty.read, keys: [key] },
+      };
+    }
+
+    return empty;
+  }
+
   private async callTool(params: Record<string, unknown> | undefined): Promise<unknown> {
     const name = typeof params?.name === 'string' ? params.name : '';
     const args = (params?.arguments && typeof params.arguments === 'object')
       ? params.arguments as Record<string, unknown>
       : {};
 
-    if (!(await this.ensureCredentials())) {
+    const requestedScopes = this.requestedScopesForTool(name, args);
+    if (!(await this.ensureCredentials(requestedScopes))) {
       return toolError(this.approvalMessage());
     }
 
@@ -684,6 +756,13 @@ function openUrl(url: string): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function scopesFromTags(tags: string[]): Scopes {
+  return {
+    read: { tags, keys: [], denyTags: [], denyKeys: [] },
+    write: { tags: [], keys: [], denyTags: [], denyKeys: [] },
+  };
 }
 
 async function readJson(response: Response): Promise<any> {

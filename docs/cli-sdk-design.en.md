@@ -1,32 +1,33 @@
 # UOMP CLI/SDK Design Document
 
-> **Status: historical design note (pre-CLI-first).** The current CLI path is `init → connect`. `connect --vault` imports notes, writes the client config, and starts the server in the background; `authorize` and `mcp --print-config` are the manual/script fallback, and `discover`, `inspect`, and `registry` are advanced commands hidden from default help. On-demand consent uses `connect --on-demand` + `pending` / `approve` / `deny`. See the [README](../README.md#quick-start) for current usage.
+> **Status: historical design note (pre-CLI-first).** The current path is agent-first: the user runs `uomp setup <client>` once, then the agent requests access when it needs data and UOMP opens the local consent page. `connect` is the advanced pre-authorize path; `authorize` and `mcp --print-config` are the manual/script fallback; `discover`, `inspect`, and `registry` are hidden advanced commands. See the [README](../README.md#quick-start) for current usage.
 >
 > The original analysis below is kept as historical context for the stock-analyst scenario.
 
 ## Current CLI (2026-10)
 
 ```bash
-# once
+# optional; setup creates this automatically
 uomp init
 
-# import + authorize + write config + start the local server in the background
-uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+# one-time client setup: import + config + background server, no access granted
+uomp setup claude --vault ~/Obsidian/MyVault
 
-# sync later / status / audit / disconnect / stop
-uomp import ~/Obsidian/MyVault
-uomp connect claude --scope notes/projects
+# the client requests access; terminal fallback:
+uomp pending
+uomp approve <request-id>
+uomp deny <request-id>
+
+# manage
 uomp status
 uomp audit
 uomp disconnect claude
 uomp stop
 uomp revoke <session-id>
 
-# on-demand consent (experimental)
-uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects --on-demand
-uomp pending
-uomp approve <request-id>
-uomp deny <request-id>
+# advanced: pre-authorize / scripts
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+uomp connect ./examples/stock-analyst --scope portfolio:holdings --allow-key AAPL MSFT
 ```
 
 Manual fallback (unsupported clients):
@@ -226,7 +227,8 @@ portfolio:holdings (8 records)
 | `uomp import <file>` | Import any private data into Memory Store |
 | `uomp data` | View data in the local Memory Store |
 | `uomp discover <path-or-registry>` | Discover Agent and display manifest information |
-| `uomp connect <claude\|cursor\|opencode\|agent>` | Connect an MCP client or agent package: authorize + write config/env + start the local server |
+| `uomp setup <client>` | One-time MCP client setup: import + config + background server, no access granted |
+| `uomp connect <claude\|cursor\|opencode\|agent>` | Advanced pre-authorize: connect an MCP client or agent package, write config/env, start the server |
 | `uomp inspect <agent>` | Verify identity, cache manifest, assess risk |
 | `uomp authorize <agent>` | Create Session and issue Token (manual/script fallback) |
 | `uomp status` | Show the background server, active sessions, and client config status |

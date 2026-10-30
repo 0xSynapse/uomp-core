@@ -1,6 +1,6 @@
 # UOMP Reference Implementation Documentation
 
-This directory contains design and implementation documents for the UOMP reference implementation (`uomp-mvp`).
+This directory contains design and implementation documents for the UOMP reference implementation (`uomp-mvp`). UOMP is an open protocol maintained by Heurion Research; [Aegis OS](https://github.com/heurion-org/aegis-os) is the reference runtime, and this repository is the reference CLI/local implementation. For the protocol-to-runtime design, see the [UOMP → Aegis OS memory consent mapping](https://github.com/heurion-org/aegis-os/blob/main/docs/UOMP_MEMORY_CONSENT_MAPPING.md).
 
 For current usage, start with the [README Quick start](../README.md#quick-start). For the protocol specification, see the [UOMP website/spec](https://www.uomp.org/spec/).
 
@@ -24,4 +24,4 @@ These documents are useful context, but they are not the current core workflow:
 | Store Abstraction Design | [`store-abstraction-design.md`](./store-abstraction-design.md) | — | Research |
 | On-chain Audit Design | [`on-chain-audit-design.md`](./on-chain-audit-design.md) | — | Research |
 
-The core current loop is: `uomp connect --vault <path>` imports Markdown/CSV/JSON and connects a client (Claude Desktop, Cursor, or OpenCode) or an agent package in one command, then reads through Memory Guard, inspects `status` / `sessions` / `audit`, and revokes. `uomp connect` writes the client config and starts the local server in the background; `uomp status` and `uomp stop` manage it, and `uomp disconnect` removes a client entry. `uomp connect --on-demand` defers authorization to the first tool call: the MCP bridge opens a local consent page, and `uomp pending` / `uomp approve` / `uomp deny` remain the terminal fallback. `uomp import`, `uomp authorize`, and `uomp mcp --print-config` remain the manual/script fallback.
+The core current loop is agent-first: `uomp setup --vault <path>` imports Markdown/CSV/JSON, writes the client config, and starts the local server without granting access. When the agent first asks for a tag or key, UOMP opens a local consent page; the user approves and the same request continues. `uomp status` / `uomp stop` manage the server, `uomp audit` shows access, and `uomp revoke` / `uomp disconnect` remove access. `uomp connect` remains the explicit pre-authorize path for scripts and agent packages; `uomp import`, `uomp authorize`, and `uomp mcp --print-config` remain the manual fallback. `uomp import`, `uomp authorize`, and `uomp mcp --print-config` remain the manual/script fallback.

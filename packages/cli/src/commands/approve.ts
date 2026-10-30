@@ -197,6 +197,41 @@ async function promptForConsent(
     promptedKeys.push(...keys);
   }
 
+  if (requested.keys.length > 0 && !options.allowKey?.length) {
+    const choices = requested.keys.map(key => {
+      const item = store.get(key);
+      return {
+        key,
+        sensitivity: item?.sensitivity ?? 'high' as Sensitivity,
+        name: `${sanitizeText(key)}${item ? ` — ${describeItem(item)}` : ''}`,
+      };
+    });
+
+    if (!process.stdin.isTTY) {
+      const highKeys = choices.filter(choice => choice.sensitivity === 'high');
+      if (highKeys.length > 0) {
+        throw new Error(
+          `High-sensitivity keys require --allow-key: ${highKeys.map(choice => choice.key).join(', ')}`
+        );
+      }
+      promptedKeys.push(...choices.map(choice => choice.key));
+    } else {
+      const result = await inquirer.prompt([
+        {
+          type: 'checkbox',
+          name: 'keys',
+          message: 'Select requested keys to expose:',
+          choices: choices.map(choice => ({
+            name: choice.name,
+            value: choice.key,
+            checked: choice.sensitivity !== 'high',
+          })),
+        },
+      ]);
+      promptedKeys.push(...result.keys as string[]);
+    }
+  }
+
   const keys = new Set<string>();
   for (const key of options.allowKey ?? []) keys.add(key);
   for (const tag of options.allowHigh ?? []) {

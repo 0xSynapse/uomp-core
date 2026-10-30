@@ -24,7 +24,7 @@ The User-Owned Memory Protocol (UOMP) defines a user-sovereign authorization pro
 
 This document is the UOMP protocol draft (Draft-00). It describes the protocol design intent, data formats, HTTP API, and security requirements. It is intended to evolve into a formal standard through public discussion. The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in [RFC 2119](https://datatracker.ietf.org/doc/html/rfc2119).
 
-> **Reference implementation status (2026-10):** the current `uomp` CLI implements the Local Profile first: `import`, `authorize` (writes a `0600` session env file), `serve`, `mcp`, `sessions`, `audit`, and `revoke`. The stdio MCP bridge is experimental. Remote Profile and Cloud Relay are optional/preview capabilities and are not required for conformance.
+> **Reference implementation status (2026-10):** the current `uomp` reference CLI implements the Local Profile first: the user runs `uomp setup` once to import notes, write the client config, and start the background server without pre-authorizing. The agent's first request for a tag/key opens the local consent page; the user approves and the call continues. `pending` / `approve` / `deny` are the terminal fallback; `connect` is the advanced pre-authorize path, and `authorize`, `serve`, and `mcp` are manual/script paths. The stdio MCP bridge is experimental. Remote Profile and Cloud Relay are optional/preview capabilities and are not required for conformance. Aegis OS is the reference runtime that enforces the protocol.
 
 ## 3. Introduction
 
@@ -101,7 +101,7 @@ The Local Profile and its MCP adapter are the current reference implementation p
 ### 5.2 Flow
 
 1. The Agent runs as an independent process and provides a `uom.json` declaring its identity and default requested memory scope.
-2. The user runs `uomp connect` from the local CLI (or `uomp authorize` for the manual flow), and the Auth Service creates a Session in the `created` state. The Auth Service may run on the same machine as the Memory Guard / Store or may be provided by a trusted service chosen by the user.
+2. The user runs `uomp setup` once (or `uomp authorize` manually). When the agent first requests data, the Auth Service creates a Session in the `created` state and UOMP opens the local consent page; the Token is issued after the user approves. The Auth Service may run on the same machine as the Memory Guard / Store or may be provided by a trusted service chosen by the user.
 3. After the user confirms or adjusts the authorization scope, the Auth Service issues a Capability Token and writes it to a `0600` session env file (`UOM_TOKEN` + `UOMP_BASE_URL`).
 4. The Session enters the `active` state, and the Agent or MCP bridge loads the env file.
 5. The Agent or MCP bridge calls Memory Guard via the HTTP API with the Token.
@@ -1377,13 +1377,20 @@ Deletion proofs can be recorded on-chain via the `AuditAnchor` contract (§18.4)
 
 ## Appendix A: Minimal Interaction Example
 
-> Current local flow for the reference CLI. `connect` is the main entry point; `authorize` / `mcp --print-config` are the manual/script fallback; `discover` / `inspect` / `registry` are advanced commands hidden from default help.
+> Current local flow for the reference CLI. `setup` is the one-time entry point; the agent requests data when needed and UOMP opens the consent page. `connect` is the advanced pre-authorize path; `authorize` / `mcp --print-config` are the manual/script fallback; `discover` / `inspect` / `registry` are advanced commands hidden from default help.
 
 ```bash
-# MCP client: import + authorize + write client config + start Auth + Guard in the background
+# MCP client: one-time setup (import + config + background server), no access granted
+uomp setup claude --vault ~/Obsidian/MyVault
+# Restart Claude Desktop, then ask it to read notes
+
+# On the agent's first request, UOMP opens the consent page; terminal fallback:
+uomp pending
+uomp approve <request-id>
+uomp deny <request-id>
+
+# Advanced: pre-authorize / scripts
 uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
-uomp status
-# Restart Claude Desktop
 
 # Agent package: authorize + write the session env file
 uomp connect ./examples/calendar-agent --scope preference

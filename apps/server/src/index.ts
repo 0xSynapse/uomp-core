@@ -43,6 +43,22 @@ async function main() {
         store.close();
       }
     },
+    consentKeyLookup: (key: string) => {
+      const store = new MemoryStore({ dbPath: memoryDbPath });
+      try {
+        const item = store.get(key);
+        if (!item) return null;
+        const value = item.value as Record<string, unknown> | null | undefined;
+        const title = value?.title ?? value?.path ?? item.description;
+        return {
+          key: item.key,
+          ...(typeof title === 'string' ? { title } : {}),
+          sensitivity: item.sensitivity,
+        };
+      } finally {
+        store.close();
+      }
+    },
   });
 
   const guard = new MemoryGuard({

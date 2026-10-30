@@ -28,6 +28,7 @@ export interface AuthServiceOptions {
   defaultDurationMinutes?: number;
   adminToken: string;
   consentKeyResolver?: (tag: string) => ConsentKeyInfo[];
+  consentKeyLookup?: (key: string) => ConsentKeyInfo | null;
 }
 
 export interface ConsentKeyInfo {
@@ -239,6 +240,7 @@ export class AuthService {
   private defaultDurationMinutes: number;
   private adminToken: string;
   private consentKeyResolver?: (tag: string) => ConsentKeyInfo[];
+  private consentKeyLookup?: (key: string) => ConsentKeyInfo | null;
   private consentTokens = new Map<string, { token: string; expiresAt: string; sessionId: string }>();
   private app: Hono;
 
@@ -248,6 +250,7 @@ export class AuthService {
     this.defaultDurationMinutes = options.defaultDurationMinutes ?? 30;
     this.adminToken = options.adminToken;
     this.consentKeyResolver = options.consentKeyResolver;
+    this.consentKeyLookup = options.consentKeyLookup;
     this.initSchema();
     this.app = this.createApp();
   }
@@ -618,7 +621,7 @@ export class AuthService {
       }
 
       for (const key of request.requestedScopes.read.keys) {
-        if (tags.some(tag => (this.consentKeyResolver?.(tag) ?? []).some(item => item.key === key))) {
+        if (requestedKeys.includes(key)) {
           allowedKeys.add(key);
         }
       }
@@ -772,6 +775,7 @@ export class AuthService {
 
   private renderConsentPage(request: ConsentRequest, secret: string): string {
     const tags = request.requestedScopes.read.tags;
+    const renderedKeys = new Set<string>();
     const rows = tags.map(tag => {
       const keys = this.consentKeyResolver?.(tag) ?? [];
       const sensitivity = keys.some(key => key.sensitivity === 'high') || inferSensitivity(tag) === 'high'
@@ -781,11 +785,14 @@ export class AuthService {
           : 'low';
       const checked = sensitivity === 'high' ? '' : ' checked';
       const keyRows = sensitivity === 'high'
-        ? keys.map(key => `
+        ? keys.map(key => {
+          renderedKeys.add(key.key);
+          return `
             <label class="key">
               <input type="checkbox" name="key" value="${escapeHtml(key.key)}">
               <span>${escapeHtml(key.key)}${key.title ? ` — ${escapeHtml(key.title)}` : ''}</span>
-            </label>`).join('')
+            </label>`;
+        }).join('')
         : '';
 
       return `
@@ -799,6 +806,20 @@ export class AuthService {
         </section>`;
     }).join('');
 
+    const requestedKeyRows = request.requestedScopes.read.keys
+      .filter(key => !renderedKeys.has(key))
+      .map(key => {
+        const info = this.consentKeyLookup?.(key);
+        const sensitivity = info?.sensitivity ?? 'high';
+        const checked = sensitivity === 'high' ? '' : ' checked';
+        return `
+          <label class="key">
+            <input type="checkbox" name="key" value="${escapeHtml(key)}"${checked}>
+            <span>${escapeHtml(key)}${info?.title ? ` — ${escapeHtml(info.title)}` : ''}</span>
+            <em class="${sensitivity}">${sensitivity}</em>
+          </label>`;
+      }).join('');
+
     const title = escapeHtml(request.agentName ?? request.agentId);
     return `<!doctype html>
 <html lang="en">
@@ -810,15 +831,16 @@ export class AuthService {
   :root { color-scheme: light dark; }
   body { font: 15px/1.5 system-ui, sans-serif; max-width: 680px; margin: 48px auto; padding: 0 20px; }
   h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+  h2 { font-size: 1rem; margin: 20px 0 8px; }
   .muted { color: #6b7280; }
   .scope { border: 1px solid #d1d5db; border-radius: 10px; padding: 12px 14px; margin: 12px 0; }
   .tag { display: flex; gap: 8px; align-items: center; font-weight: 600; }
-  .tag em { margin-left: auto; font-style: normal; font-size: .75rem; padding: 2px 8px; border-radius: 999px; }
-  .tag em.low { background: #dcfce7; color: #166534; }
-  .tag em.medium { background: #fef3c7; color: #92400e; }
-  .tag em.high { background: #fee2e2; color: #991b1b; }
+  .tag em, .key em { margin-left: auto; font-style: normal; font-size: .7rem; padding: 2px 7px; border-radius: 999px; }
+  .tag em.low, .key em.low { background: #dcfce7; color: #166534; }
+  .tag em.medium, .key em.medium { background: #fef3c7; color: #92400e; }
+  .tag em.high, .key em.high { background: #fee2e2; color: #991b1b; }
   .keys { margin: 10px 0 0 24px; display: grid; gap: 6px; }
-  .key { display: flex; gap: 8px; font-size: .9rem; color: #4b5563; }
+  .key { display: flex; gap: 8px; font-size: .9rem; color: #4b5563; padding: 6px 0; }
   .actions { display: flex; gap: 10px; margin-top: 24px; }
   button { font: inherit; padding: 9px 18px; border-radius: 8px; border: 1px solid #d1d5db; cursor: pointer; }
   button.approve { background: #2563eb; color: #fff; border-color: #2563eb; }
@@ -828,10 +850,11 @@ export class AuthService {
 <body>
   <h1>Allow ${title}?</h1>
   <p class="muted">${escapeHtml(request.client ?? request.agentId)} · expires ${escapeHtml(request.expiresAt)}</p>
-  <p>High-sensitivity tags are unchecked by default. If you select one, choose the keys it may read.</p>
+  <p>High-sensitivity tags and keys are unchecked by default. Select what this agent may read.</p>
   <form method="post" action="/consent/${encodeURIComponent(request.requestId)}">
     <input type="hidden" name="secret" value="${escapeHtml(secret)}">
-    ${rows || '<p class="muted">This request has no readable tags.</p>'}
+    ${rows || (requestedKeyRows ? '' : '<p class="muted">This request has no readable scope.</p>')}
+    ${requestedKeyRows ? `<h2>Requested keys</h2><section class="scope">${requestedKeyRows}</section>` : ''}
     <div class="actions">
       <button class="approve" name="action" value="approve" type="submit">Approve</button>
       <button class="deny" name="action" value="deny" type="submit">Deny</button>

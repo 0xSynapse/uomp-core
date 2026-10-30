@@ -1,32 +1,33 @@
 # UOMP CLI/SDK 设计文档
 
-> **状态：历史设计文档（CLI-first 之前）。** 当前 CLI 主路径是 `init → connect`；`connect --vault` 可同时导入笔记、写客户端配置并后台启动服务，`authorize` 和 `mcp --print-config` 作为手动/脚本 fallback，`discover`、`inspect`、`registry` 是默认隐藏的高级命令。按需授权使用 `connect --on-demand` + `pending` / `approve` / `deny`。当前用法见 [README](../README.md#quick-start)。
+> **状态：历史设计文档（CLI-first 之前）。** 当前 CLI 主路径是让 Agent 客户端做入口：用户只运行一次 `uomp setup <client>`，之后由 Agent 在需要时发起请求，UOMP 打开本地审批页。`connect` 是高级预授权入口，`authorize` 和 `mcp --print-config` 是手动/脚本 fallback；`discover`、`inspect`、`registry` 默认隐藏。当前用法见 [README](../README.md#quick-start)。
 >
 > 下面保留原始设计分析，作为股票分析 Agent 场景的历史参考。
 
 ## 当前 CLI（2026-10）
 
 ```bash
-# 一次性初始化
+# 一次性初始化（可选；setup 会自动创建）
 uomp init
 
-# 导入 + 授权 + 写配置 + 后台启动本地服务
-uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+# 一次性设置客户端：导入 + 写配置 + 后台服务，不授权
+uomp setup claude --vault ~/Obsidian/MyVault
 
-# 之后同步 / 状态 / 审计 / 断开 / 停止服务
-uomp import ~/Obsidian/MyVault
-uomp connect claude --scope notes/projects
+# 之后由客户端发起请求，UOMP 打开审批页；终端兜底：
+uomp pending
+uomp approve <request-id>
+uomp deny <request-id>
+
+# 管理
 uomp status
 uomp audit
 uomp disconnect claude
 uomp stop
 uomp revoke <session-id>
 
-# 按需授权（实验）
-uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects --on-demand
-uomp pending
-uomp approve <request-id>
-uomp deny <request-id>
+# 高级：预授权 / 脚本
+uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+uomp connect ./examples/stock-analyst --scope portfolio:holdings --allow-key AAPL MSFT
 ```
 
 手动 fallback（不支持的客户端）：
@@ -226,7 +227,8 @@ portfolio:holdings（8 条记录）
 | `uomp import <file>` | 导入任意私有数据到 Memory Store |
 | `uomp data` | 查看本地 Memory Store 中的数据 |
 | `uomp discover <path-or-registry>` | 发现 Agent，显示清单信息 |
-| `uomp connect <claude\|cursor\|opencode\|agent>` | 连接 MCP 客户端或 Agent 包：授权 + 写配置/env + 启动本地服务 |
+| `uomp setup <client>` | 一次性设置 MCP 客户端：导入 + 写配置 + 后台服务，不授权 |
+| `uomp connect <claude\|cursor\|opencode\|agent>` | 高级预授权：连接 MCP 客户端或 Agent 包，写配置/env 并启动服务 |
 | `uomp inspect <agent>` | 验证身份，缓存清单，评估风险 |
 | `uomp authorize <agent>` | 创建 Session 并签发 Token（手动/脚本 fallback） |
 | `uomp status` | 查看后台服务、活跃会话和客户端配置状态 |

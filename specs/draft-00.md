@@ -24,7 +24,7 @@ User-Owned Memory Protocol（UOMP）定义了一种用户主权型授权协议�
 
 本文档为 UOMP 协议草案（Draft-00），描述协议设计意图、数据格式、HTTP API 和安全要求。本文档旨在通过公开讨论后演进为正式标准。本文档中的关键词 "MUST"、"MUST NOT"、"REQUIRED"、"SHALL"、"SHALL NOT"、"SHOULD"、"SHOULD NOT"、"RECOMMENDED"、"MAY"、"OPTIONAL" 按照 [RFC 2119](https://datatracker.ietf.org/doc/html/rfc2119) 解释。
 
-> **参考实现状态（2026-10）：** 当前 `uomp` CLI 优先实现 Local Profile：`import`、`authorize`（写入 `0600` 会话 env 文件）、`serve`、`mcp`、`sessions`、`audit`、`revoke`。stdio MCP bridge 为实验能力。Remote Profile 和 Cloud Relay 是可选/预览能力，不是通过一致性验证的必要条件。
+> **参考实现状态（2026-10）：** 当前 `uomp` reference CLI 优先实现 Local Profile：用户运行一次 `uomp setup` 完成导入、客户端配置和后台服务，不预先授权；Agent 第一次请求 tag/key 时打开本地审批页，用户批准后继续。`pending` / `approve` / `deny` 是终端兜底；`connect` 是高级预授权入口，`authorize`、`serve`、`mcp` 是手动/脚本路径。stdio MCP bridge 为实验能力。Remote Profile 和 Cloud Relay 是可选/预览能力，不是通过一致性验证的必要条件。Aegis OS 是执行该协议的参考运行时。
 
 ## 3. Introduction
 
@@ -101,7 +101,7 @@ Local Profile 和它的 MCP 适配器是当前参考实现的主路径；Remote 
 ### 5.2 Flow
 
 1. Agent 作为独立进程运行，提供 `uom.json` 声明其身份和默认请求的记忆范围。
-2. 用户通过本机 CLI 执行 `uomp connect`（或 `uomp authorize` 手动流程），Auth Service 创建 Session（`created` 状态）。Auth Service 可以与 Memory Guard / Store 位于同一机器，也可以由用户选择的可信服务提供。
+2. 用户运行一次 `uomp setup`（或手动 `uomp authorize`）。Agent 第一次请求数据时，Auth Service 创建 Session（`created` 状态），UOMP 打开本地审批页；用户确认后签发 Token。Auth Service 可以与 Memory Guard / Store 位于同一机器，也可以由用户选择的可信服务提供。
 3. 用户确认或调整授权范围后，Auth Service 签发 Capability Token，并将其写入 `0600` 会话 env 文件（`UOM_TOKEN` + `UOMP_BASE_URL`）。
 4. Session 进入 `active` 状态，Agent 或 MCP bridge 加载该 env 文件。
 5. Agent 或 MCP bridge 通过 HTTP API 携带 Token 访问 Memory Guard。
@@ -1388,13 +1388,20 @@ Auth Service 或 Gateway 收到后：
 
 ## 附录 A: 最小交互示例
 
-> 参考 CLI 的当前本地流程。`connect` 是主入口；`authorize` / `mcp --print-config` 是手动/脚本 fallback；`discover` / `inspect` / `registry` 是默认隐藏的高级命令。
+> 参考 CLI 的当前本地流程。`setup` 是一次性入口；Agent 在需要数据时发起请求，UOMP 打开审批页。`connect` 是高级预授权入口，`authorize` / `mcp --print-config` 是手动/脚本 fallback；`discover` / `inspect` / `registry` 是默认隐藏的高级命令。
 
 ```bash
-# MCP 客户端：导入 + 授权 + 写客户端配置 + 后台启动本地 Auth + Guard
+# MCP 客户端：一次性设置（导入 + 写配置 + 后台服务），不授权
+uomp setup claude --vault ~/Obsidian/MyVault
+# 重启 Claude Desktop，然后在客户端里请求数据
+
+# Agent 第一次请求时，UOMP 打开审批页；终端兜底：
+uomp pending
+uomp approve <request-id>
+uomp deny <request-id>
+
+# 高级：预授权 / 脚本
 uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
-uomp status
-# 重启 Claude Desktop
 
 # Agent 包：授权 + 写会话 env 文件
 uomp connect ./examples/calendar-agent --scope preference

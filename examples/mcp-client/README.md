@@ -2,31 +2,27 @@
 
 This manifest is for Claude Desktop, Cursor, OpenCode, or any other MCP client. It requests no scopes by default; grant tags explicitly with `--scope`.
 
-## One command
+## One-time setup
 
 ```bash
-uomp connect claude --scope notes/projects
+uomp setup claude --vault ~/Obsidian/MyVault
 ```
 
-If your Markdown vault is not imported yet, add `--vault`:
+`uomp setup` imports the vault, starts the local server in the background, and writes the UOMP entry into the client config. It does **not** grant access. Restart the client, then ask it to list notes under `notes/projects`.
+
+The first tool call requests `notes/projects`; UOMP opens a local approval page. Approve it and the same request continues. If the page does not open, use `uomp pending` and `uomp approve <request-id>`; `uomp deny <request-id>` closes the request without granting access.
+
+Use `uomp setup cursor` or `uomp setup opencode` for the other clients. `uomp status` shows the server and sessions; `uomp stop` stops the server; `uomp disconnect <client>` removes the config entry and revokes the session.
+
+## Advanced: pre-authorize
+
+`uomp connect` skips the approval page and creates a session immediately:
 
 ```bash
 uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
 ```
 
-`uomp connect` starts the local server in the background, creates a scoped session, writes the session env file, and merges the UOMP entry into the client config. Restart the client, then ask it to list notes under `notes/projects`.
-
-Use `uomp connect cursor` or `uomp connect opencode` for the other clients. Re-run the same command to renew; the client does not need a restart. `uomp status` shows the server and sessions; `uomp stop` stops the server; `uomp disconnect <client>` removes the config entry and revokes the session.
-
-## On-demand consent
-
-Add `--on-demand` to defer authorization until the first tool call:
-
-```bash
-uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects --on-demand
-```
-
-The first tool call opens a local approval page. If the page does not open, use `uomp pending` and `uomp approve <request-id>`; `uomp deny <request-id>` closes the request without granting access.
+Use this for scripts/CI or when you explicitly want to choose the scope before the agent runs.
 
 ## Manual setup
 

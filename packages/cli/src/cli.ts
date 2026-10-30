@@ -24,6 +24,7 @@ import { DenyCommands } from './commands/deny.js';
 import { StatusCommands } from './commands/status.js';
 import { StopCommands } from './commands/stop.js';
 import { StartCommands } from './commands/start.js';
+import { SetupCommands } from './commands/setup.js';
 import { parseHost, parsePort } from './utils/server.js';
 
 if (process.platform === 'win32') {
@@ -134,6 +135,7 @@ program
   });
 
 program.addCommand(ConnectCommands.get());
+program.addCommand(SetupCommands.get());
 program.addCommand(ServeCommands.get());
 program.addCommand(StartCommands.get());
 program.addCommand(McpCommands.get());
@@ -224,33 +226,32 @@ program
   .addCommand(GatewayCommands.status());
 
 program.addHelpText('after', `
-Core flow:
-  $ uomp demo
-  $ uomp init
-  $ uomp import ~/Obsidian/MyVault
-  $ uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+Fast path:
+  $ uomp setup claude --vault ~/Obsidian/MyVault
+  $ open Claude and ask it to read your notes
   $ uomp status
+
+The first tool call opens the local UOMP approval page.
+
+Manual / pre-authorize:
+  $ uomp connect claude --vault ~/Obsidian/MyVault --scope notes/projects
+  $ uomp connect ./my-agent --scope notes/projects
+  $ uomp authorize --scope notes/projects --output ~/.uomp/sessions/client.env --no-server
+  $ uomp mcp --session ~/.uomp/sessions/client.env --print-config
+
+Manage access:
+  $ uomp revoke <session-id>
   $ uomp disconnect claude
   $ uomp stop
 
-Manage the server without a client:
-  $ uomp start
-  $ uomp status
-  $ uomp stop
-
-On-demand consent (MCP clients):
+On-demand consent:
   $ uomp pending
   $ uomp approve <request-id>
   $ uomp deny <request-id>
 
-Connect an agent package:
-  $ uomp connect ./my-agent --scope notes/projects
-
-Manual / unsupported clients:
-  $ uomp authorize --scope notes/projects --output ~/.uomp/sessions/client.env --no-server
-  $ uomp mcp --session ~/.uomp/sessions/client.env --print-config
-
-Check your setup:
+Optional:
+  $ uomp demo
+  $ uomp init
   $ uomp doctor
 
 Advanced commands (hidden): memory, registry, discover, inspect, agent, gateway
