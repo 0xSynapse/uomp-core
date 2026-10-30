@@ -572,6 +572,8 @@ The Auth Service MUST verify `session_id` matches the path. If the Token has `ta
 | GET | `/v1/payload/:id` | Read a payload (same session or admin) |
 | GET | `/v1/payload` | List payload metadata (admin) |
 | DELETE | `/v1/payload/:id` | Delete a payload (admin) |
+| POST | `/v1/remote/requests` | Remote Agent requests access (public; returns a poll secret) |
+| GET | `/v1/remote/requests/:id?secret=:poll_secret` | Poll status; retrieve a one-time token after approval |
 
 ### 10.2 Read by Key
 

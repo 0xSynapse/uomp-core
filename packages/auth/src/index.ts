@@ -55,6 +55,8 @@ export interface ConsentRequest {
   approvedAt?: string;
   grantedScopes?: Scopes;
   aegisEscalationIds?: string[];
+  remoteAudience?: string;
+  remoteProfile?: string;
 }
 
 /**
@@ -79,6 +81,18 @@ export interface CreateConsentRequestInput {
   duration_minutes?: number;
   env_path?: string;
   base_url?: string;
+  remote?: {
+    audience: string;
+    profile?: string;
+  };
+}
+
+export interface RemoteConsentRequestInput {
+  agent_id: string;
+  agent_name?: string;
+  requested_scopes: Scopes;
+  duration_minutes?: number;
+  audience: string;
 }
 
 const scopeActionSchema = z.object({
@@ -110,6 +124,14 @@ const grantSessionSchema = z.object({
   allowed_fields: z.array(z.string()).optional(),
   aggregation_only: z.boolean().optional(),
   task_bound: z.boolean().optional(),
+});
+
+const remoteRequestSchema = z.object({
+  agent_id: z.string(),
+  agent_name: z.string().optional(),
+  requested_scopes: scopesSchema,
+  duration_minutes: z.number().min(1).max(1440).default(10),
+  audience: z.string().min(1),
 });
 
 const consentRequestSchema = z.object({
@@ -309,7 +331,11 @@ export class AuthService {
         expires_at TEXT NOT NULL,
         approved_at TEXT,
         granted_scopes TEXT,
-        aegis_escalations TEXT
+        aegis_escalations TEXT,
+        remote_secret_hash TEXT,
+        remote_audience TEXT,
+        remote_profile TEXT,
+        remote_delivered_at TEXT
       );
     `);
 
@@ -322,6 +348,18 @@ export class AuthService {
     }
     if (!consentColumns.some(column => column.name === 'aegis_escalations')) {
       this.db.exec('ALTER TABLE consent_requests ADD COLUMN aegis_escalations TEXT');
+    }
+    if (!consentColumns.some(column => column.name === 'remote_secret_hash')) {
+      this.db.exec('ALTER TABLE consent_requests ADD COLUMN remote_secret_hash TEXT');
+    }
+    if (!consentColumns.some(column => column.name === 'remote_audience')) {
+      this.db.exec('ALTER TABLE consent_requests ADD COLUMN remote_audience TEXT');
+    }
+    if (!consentColumns.some(column => column.name === 'remote_profile')) {
+      this.db.exec('ALTER TABLE consent_requests ADD COLUMN remote_profile TEXT');
+    }
+    if (!consentColumns.some(column => column.name === 'remote_delivered_at')) {
+      this.db.exec('ALTER TABLE consent_requests ADD COLUMN remote_delivered_at TEXT');
     }
   }
 
@@ -477,6 +515,45 @@ export class AuthService {
       `).run(new Date().toISOString(), sessionId);
 
       return c.json({ status: 'accepted', deletion_proof_id: proof.deletion_proof_id });
+    });
+
+    app.post('/v1/remote/requests', async c => {
+      const body = await c.req.json();
+      const parsed = remoteRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json({ error: { code: 'INVALID_REQUEST', message: parsed.error.message } }, 400);
+      }
+
+      try {
+        const { request, pollSecret } = await this.createRemoteConsentRequest(parsed.data);
+        return c.json({
+          request_id: request.requestId,
+          status: request.status,
+          poll_secret: pollSecret,
+          poll_url: `/v1/remote/requests/${request.requestId}`,
+          expires_at: request.expiresAt,
+          audience: request.remoteAudience,
+        }, 201);
+      } catch (error) {
+        return c.json({
+          error: {
+            code: 'REMOTE_REQUEST_DENIED',
+            message: error instanceof Error ? error.message : String(error),
+          },
+        }, 403);
+      }
+    });
+
+    app.get('/v1/remote/requests/:id', c => {
+      const secret = c.req.query('secret');
+      if (!secret) {
+        return c.json({ error: { code: 'UNAUTHORIZED', message: 'poll secret required' } }, 401);
+      }
+      const result = this.getRemoteConsentRequest(c.req.param('id'), secret);
+      if (!result) {
+        return c.json({ error: { code: 'REQUEST_NOT_FOUND', message: 'Remote request not found' } }, 404);
+      }
+      return c.json(result);
     });
 
     app.post('/v1/consent/requests', async c => {
@@ -726,9 +803,10 @@ export class AuthService {
 
   async createConsentRequestWithAegis(
     data: CreateConsentRequestInput,
+    options: { remoteSecretHash?: string } = {},
   ): Promise<{ request: ConsentRequest; secret: string }> {
     if (!this.aegis) {
-      return this.createConsentRequest(data);
+      return this.insertConsentRequest(data, [], options.remoteSecretHash);
     }
 
     const evaluation = await this.aegis.evaluateScopes(data.requested_scopes);
@@ -736,12 +814,28 @@ export class AuthService {
       throw new Error('Aegis denied the memory request.');
     }
 
-    return this.insertConsentRequest(data, evaluation.escalationIds);
+    return this.insertConsentRequest(data, evaluation.escalationIds, options.remoteSecretHash);
+  }
+
+  async createRemoteConsentRequest(
+    data: RemoteConsentRequestInput,
+  ): Promise<{ request: ConsentRequest; secret: string; pollSecret: string }> {
+    const pollSecret = randomBytes(24).toString('hex');
+    const result = await this.createConsentRequestWithAegis({
+      agent_id: data.agent_id,
+      ...(data.agent_name ? { agent_name: data.agent_name } : {}),
+      requested_scopes: data.requested_scopes,
+      duration_minutes: data.duration_minutes ?? this.defaultDurationMinutes,
+      remote: { audience: data.audience, profile: 'remote' },
+    }, { remoteSecretHash: hashSecret(pollSecret) });
+
+    return { ...result, pollSecret };
   }
 
   private insertConsentRequest(
     data: CreateConsentRequestInput,
     aegisEscalationIds: string[],
+    remoteSecretHash?: string,
   ): { request: ConsentRequest; secret: string } {
     const session = this.createSession({
       agent_id: data.agent_id,
@@ -754,12 +848,15 @@ export class AuthService {
     const createdAt = new Date().toISOString();
     const secret = randomBytes(24).toString('hex');
     const secretHash = hashSecret(secret);
+    const remoteAudience = data.remote?.audience;
+    const remoteProfile = data.remote?.profile ?? (data.remote ? 'remote' : undefined);
 
     this.db.prepare(`
       INSERT INTO consent_requests (
         request_id, session_id, client, agent_id, agent_name, requested_scopes,
-        env_path, base_url, secret_hash, status, created_at, expires_at, aegis_escalations
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+        env_path, base_url, secret_hash, status, created_at, expires_at, aegis_escalations,
+        remote_secret_hash, remote_audience, remote_profile
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
     `).run(
       requestId,
       session.sessionId,
@@ -772,7 +869,10 @@ export class AuthService {
       secretHash,
       createdAt,
       session.expiresAt,
-      aegisEscalationIds.length > 0 ? JSON.stringify(aegisEscalationIds) : null
+      aegisEscalationIds.length > 0 ? JSON.stringify(aegisEscalationIds) : null,
+      remoteSecretHash ?? null,
+      remoteAudience ?? null,
+      remoteProfile ?? null
     );
 
     return {
@@ -791,10 +891,55 @@ export class AuthService {
         ...(aegisEscalationIds.length > 0
           ? { aegisEscalationIds }
           : {}),
+        ...(remoteAudience ? { remoteAudience } : {}),
+        ...(remoteProfile ? { remoteProfile } : {}),
       },
       secret,
     };
   }
+
+  getRemoteConsentRequest(
+    requestId: string,
+    pollSecret: string,
+  ): { status: ConsentRequestStatus; token?: string; token_type?: string; session_id?: string; expires_at?: string; delivered?: boolean } | null {
+    const row = this.db.prepare('SELECT * FROM consent_requests WHERE request_id = ?')
+      .get(requestId) as Record<string, string> | undefined;
+    if (!row?.remote_secret_hash) return null;
+
+    const expected = Buffer.from(row.remote_secret_hash);
+    const actual = Buffer.from(hashSecret(pollSecret));
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+      return null;
+    }
+
+    const request = this.getConsentRequest(requestId);
+    if (!request) return null;
+
+    if (request.status !== 'approved') {
+      return { status: request.status, expires_at: request.expiresAt };
+    }
+
+    if (row.remote_delivered_at) {
+      return { status: 'approved', delivered: true, expires_at: request.expiresAt };
+    }
+
+    const stored = this.consentTokens.get(requestId);
+    if (!stored) {
+      return { status: 'approved', delivered: true, expires_at: request.expiresAt };
+    }
+
+    this.db.prepare('UPDATE consent_requests SET remote_delivered_at = ? WHERE request_id = ?')
+      .run(new Date().toISOString(), requestId);
+
+    return {
+      status: 'approved',
+      token: stored.token,
+      token_type: 'Bearer',
+      session_id: stored.sessionId,
+      expires_at: stored.expiresAt,
+    };
+  }
+
 
   getConsentRequest(requestId: string): ConsentRequest | null {
     const row = this.db.prepare('SELECT * FROM consent_requests WHERE request_id = ?')
@@ -955,7 +1100,10 @@ export class AuthService {
       await this.aegis.approveEscalations(request.aegisEscalationIds, ttlSecs);
     }
 
-    const result = await this.grantSession(request.sessionId, grantedScopes);
+    const result = await this.grantSession(request.sessionId, grantedScopes, {
+      ...(request.remoteProfile ? { profile: request.remoteProfile } : {}),
+      ...(request.remoteAudience ? { audience: request.remoteAudience } : {}),
+    });
     if (!result) {
       return null;
     }
@@ -1157,6 +1305,8 @@ export class AuthService {
       ...(row.aegis_escalations
         ? { aegisEscalationIds: JSON.parse(row.aegis_escalations) as string[] }
         : {}),
+      ...(row.remote_audience ? { remoteAudience: row.remote_audience } : {}),
+      ...(row.remote_profile ? { remoteProfile: row.remote_profile } : {}),
     };
   }
 

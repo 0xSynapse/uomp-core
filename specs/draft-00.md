@@ -575,6 +575,8 @@ Auth Service MUST 校验 `session_id` 与路径一致，并记录审计日志。
 | GET | `/v1/payload/:id` | 读取 payload（同 session 或管理员） |
 | GET | `/v1/payload` | 列出 payload 元数据（管理员） |
 | DELETE | `/v1/payload/:id` | 删除 payload（管理员） |
+| POST | `/v1/remote/requests` | 远程 Agent 发起授权请求（公开，返回 poll secret） |
+| GET | `/v1/remote/requests/:id?secret=:poll_secret` | 轮询审批状态；批准后一次性领取 token |
 
 ### 10.2 Read by Key
 

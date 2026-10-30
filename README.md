@@ -150,6 +150,7 @@ The remote path has an end-to-end test: `pnpm test:e2e` starts UOMP, mints a rem
 | Examples | Calendar agent and stock analyst |
 | Writes | Staged in SQLite; `uomp staged list/approve/deny`; high-sensitivity writes rejected |
 | Payloads | Encrypted envelope upload/list/get/delete; `uomp payload list/get/delete` |
+| Remote onboarding | Agent posts `/v1/remote/requests`; user approves locally; agent polls a one-time remote token |
 | Admin operations | Session create/grant/revoke require a local admin token |
 
 ### What we are building next
@@ -512,6 +513,7 @@ export UOMP_AEGIS_AGENT=uomp
 | 示例 | Calendar Agent、Stock Analyst |
 | 写入 | SQLite staging；`uomp staged list/approve/deny`；高敏写入拒绝 |
 | Payload | 加密 envelope 上传/列出/读取/删除；`uomp payload list/get/delete` |
+| 远程接入 | Agent 调用 `/v1/remote/requests`；用户本地批准；Agent 轮询一次性 remote token |
 | 管理员操作 | create/grant/revoke 需要本机管理员令牌 |
 
 ### 下一步做什么

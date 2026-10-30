@@ -64,7 +64,7 @@ function httpsRequest({ port, path, token, ca, cert, key, method = 'GET', body }
       key,
       servername: 'localhost',
       headers: {
-        authorization: `Bearer ${token}`,
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
         ...(body ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } : {}),
       },
     }, (response) => {
@@ -351,4 +351,64 @@ test('remote Agent reaches local Guard through the mTLS Aegis Memory Gateway', {
     key: certs.clientKey,
   });
   assert.equal(wrongAudience.status, 403, wrongAudience.body);
+
+  // Remote onboarding: the Agent asks through the public gateway route, the
+  // user approves locally, and the Agent polls a one-time remote token.
+  const onboarding = await httpsRequest({
+    port: gatewayPort,
+    path: '/v1/remote/requests',
+    ca: certs.ca,
+    cert: certs.clientCert,
+    key: certs.clientKey,
+    method: 'POST',
+    body: JSON.stringify({
+      agent_id: 'device-agent',
+      agent_name: 'Device Agent',
+      requested_scopes: scopes,
+      duration_minutes: 5,
+      audience: AUDIENCE,
+    }),
+  });
+  assert.equal(onboarding.status, 201, onboarding.body);
+  const remoteRequest = JSON.parse(onboarding.body);
+  assert.ok(remoteRequest.request_id);
+  assert.ok(remoteRequest.poll_secret);
+
+  const pending = await httpsRequest({
+    port: gatewayPort,
+    path: `/v1/remote/requests/${remoteRequest.request_id}?secret=${remoteRequest.poll_secret}`,
+    ca: certs.ca,
+    cert: certs.clientCert,
+    key: certs.clientKey,
+  });
+  assert.equal(pending.status, 200, pending.body);
+  assert.equal(JSON.parse(pending.body).status, 'pending');
+
+  await jsonRequest(`${base}/v1/consent/requests/${remoteRequest.request_id}/approve`, {
+    method: 'POST',
+    headers: adminHeaders,
+    body: JSON.stringify({ granted_scopes: scopes }),
+  });
+
+  const polled = await httpsRequest({
+    port: gatewayPort,
+    path: `/v1/remote/requests/${remoteRequest.request_id}?secret=${remoteRequest.poll_secret}`,
+    ca: certs.ca,
+    cert: certs.clientCert,
+    key: certs.clientKey,
+  });
+  assert.equal(polled.status, 200, polled.body);
+  const remoteToken = JSON.parse(polled.body).token;
+  assert.ok(remoteToken);
+
+  const onboardedRead = await httpsRequest({
+    port: gatewayPort,
+    path: '/v1/memory?tag=notes/projects',
+    token: remoteToken,
+    ca: certs.ca,
+    cert: certs.clientCert,
+    key: certs.clientKey,
+  });
+  assert.equal(onboardedRead.status, 200, onboardedRead.body);
+  assert.match(onboardedRead.body, /note\.projects\.plan/);
 });
