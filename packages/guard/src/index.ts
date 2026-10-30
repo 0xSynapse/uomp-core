@@ -75,6 +75,15 @@ export class MemoryGuard {
 
       CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_logs(session_id);
       CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp);
+
+      CREATE TABLE IF NOT EXISTS payloads (
+        payload_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        envelope TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_payloads_session ON payloads(session_id);
     `);
   }
 
@@ -82,18 +91,21 @@ export class MemoryGuard {
     return this.app;
   }
 
-  private requireAdmin(c: Context): Response | null {
-    if (!this.adminToken) {
-      return c.json({ error: { code: 'ADMIN_DISABLED', message: 'Staged-write approval is not configured' } }, 503);
-    }
+  private isAdmin(c: Context): boolean {
+    if (!this.adminToken) return false;
     const provided = c.req.header('x-uomp-admin-token');
-    if (!provided) {
-      return c.json({ error: { code: 'UNAUTHORIZED', message: 'Admin token required' } }, 401);
-    }
+    if (!provided) return false;
     const expected = Buffer.from(this.adminToken);
     const actual = Buffer.from(provided);
-    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
-      return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid admin token' } }, 401);
+    return expected.length === actual.length && timingSafeEqual(expected, actual);
+  }
+
+  private requireAdmin(c: Context): Response | null {
+    if (!this.adminToken) {
+      return c.json({ error: { code: 'ADMIN_DISABLED', message: 'Admin approval is not configured' } }, 503);
+    }
+    if (!this.isAdmin(c)) {
+      return c.json({ error: { code: 'UNAUTHORIZED', message: 'Admin token required' } }, 401);
     }
     return null;
   }
@@ -383,6 +395,106 @@ export class MemoryGuard {
         reason: 'STAGED_WRITE_DENIED',
       });
       return c.json({ status: 'denied', staged_write: staged });
+    });
+
+    app.post('/v1/payload', async c => {
+      const authHeader = c.req.header('authorization');
+      const validation = await this.validateRequest(authHeader);
+      if (!validation.valid) {
+        return c.json(
+          { error: { code: validation.errorCode, message: validation.reason, session_id: validation.sessionId } },
+          this.statusForValidationError(validation.errorCode)
+        );
+      }
+
+      const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
+      if (!body || typeof body.ciphertext !== 'string' || body.ciphertext.length === 0) {
+        return c.json({ error: { code: 'INVALID_REQUEST', message: 'ciphertext is required' } }, 400);
+      }
+      if (!body.encryption || typeof body.encryption !== 'object') {
+        return c.json({ error: { code: 'INVALID_REQUEST', message: 'encryption metadata is required' } }, 400);
+      }
+      if (body.session_id && body.session_id !== validation.payload.sessionId) {
+        return c.json({ error: { code: 'SESSION_MISMATCH', message: 'payload session does not match token' } }, 403);
+      }
+      if (body.agent_id && body.agent_id !== validation.payload.agentId) {
+        return c.json({ error: { code: 'AGENT_MISMATCH', message: 'payload agent does not match token' } }, 403);
+      }
+
+      const payloadId = generateId('pay');
+      const envelope = {
+        ...body,
+        payload_id: payloadId,
+        session_id: validation.payload.sessionId,
+        agent_id: validation.payload.agentId,
+        timestamp: typeof body.timestamp === 'string' ? body.timestamp : new Date().toISOString(),
+      };
+      this.db.prepare(`
+        INSERT INTO payloads (payload_id, session_id, agent_id, envelope, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        payloadId,
+        validation.payload.sessionId,
+        validation.payload.agentId,
+        JSON.stringify(envelope),
+        new Date().toISOString(),
+      );
+
+      this.logAudit({
+        sessionId: validation.payload.sessionId,
+        agentId: validation.payload.agentId,
+        action: 'write',
+        allowed: true,
+        reason: 'PAYLOAD_STORED',
+      });
+
+      return c.json({ payload_id: payloadId, status: 'stored', session_id: validation.payload.sessionId }, 201);
+    });
+
+    app.get('/v1/payload/:id', async c => {
+      const row = this.db.prepare('SELECT * FROM payloads WHERE payload_id = ?')
+        .get(c.req.param('id')) as Record<string, string> | undefined;
+      if (!row) {
+        return c.json({ error: { code: 'PAYLOAD_NOT_FOUND', message: 'Payload not found' } }, 404);
+      }
+
+      const validation = await this.validateRequest(c.req.header('authorization'));
+      const admin = this.isAdmin(c);
+      if (!admin && (!validation.valid || row.session_id !== validation.payload.sessionId)) {
+        return c.json({ error: { code: 'ACCESS_DENIED', message: 'Payload belongs to another session' } }, 403);
+      }
+
+      return c.json(JSON.parse(row.envelope) as Record<string, unknown>);
+    });
+
+    app.get('/v1/payload', async c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+      const rows = this.db.prepare('SELECT * FROM payloads ORDER BY created_at DESC').all() as Record<string, string>[];
+      return c.json({
+        payloads: rows.map(row => {
+          const envelope = JSON.parse(row.envelope) as Record<string, unknown>;
+          return {
+            payload_id: row.payload_id,
+            session_id: row.session_id,
+            agent_id: row.agent_id,
+            created_at: row.created_at,
+            format: envelope.format,
+            size: envelope.size,
+            hash: envelope.hash,
+          };
+        }),
+      });
+    });
+
+    app.delete('/v1/payload/:id', async c => {
+      const unauthorized = this.requireAdmin(c);
+      if (unauthorized) return unauthorized;
+      const result = this.db.prepare('DELETE FROM payloads WHERE payload_id = ?').run(c.req.param('id'));
+      if (result.changes === 0) {
+        return c.json({ error: { code: 'PAYLOAD_NOT_FOUND', message: 'Payload not found' } }, 404);
+      }
+      return c.json({ status: 'deleted', payload_id: c.req.param('id') });
     });
 
     app.delete('/v1/memory/:key', async c => {

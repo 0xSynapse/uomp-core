@@ -149,6 +149,7 @@ The remote path has an end-to-end test: `pnpm test:e2e` starts UOMP, mints a rem
 | SDK | TypeScript (`@uomp/sdk`) |
 | Examples | Calendar agent and stock analyst |
 | Writes | Staged in SQLite; `uomp staged list/approve/deny`; high-sensitivity writes rejected |
+| Payloads | Encrypted envelope upload/list/get/delete; `uomp payload list/get/delete` |
 | Admin operations | Session create/grant/revoke require a local admin token |
 
 ### What we are building next
@@ -510,6 +511,7 @@ export UOMP_AEGIS_AGENT=uomp
 | SDK | TypeScript（`@uomp/sdk`） |
 | 示例 | Calendar Agent、Stock Analyst |
 | 写入 | SQLite staging；`uomp staged list/approve/deny`；高敏写入拒绝 |
+| Payload | 加密 envelope 上传/列出/读取/删除；`uomp payload list/get/delete` |
 | 管理员操作 | create/grant/revoke 需要本机管理员令牌 |
 
 ### 下一步做什么

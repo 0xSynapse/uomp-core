@@ -571,6 +571,10 @@ Auth Service MUST 校验 `session_id` 与路径一致，并记录审计日志。
 | GET | `/v1/staged-writes` | 列出待审批写入（管理员） |
 | POST | `/v1/staged-writes/:id/approve` | 批准并应用暂存写入（管理员） |
 | POST | `/v1/staged-writes/:id/deny` | 拒绝暂存写入（管理员） |
+| POST | `/v1/payload` | 上传加密 payload envelope |
+| GET | `/v1/payload/:id` | 读取 payload（同 session 或管理员） |
+| GET | `/v1/payload` | 列出 payload 元数据（管理员） |
+| DELETE | `/v1/payload/:id` | 删除 payload（管理员） |
 
 ### 10.2 Read by Key
 
@@ -965,7 +969,7 @@ GET  /v1/memory/{key}
 GET  /v1/memory?tag={tag}
 GET  /v1/memory/aggregate?tag={tag}&op={op}
 GET  /v1/audit?session_id={session_id}
-POST /v1/payload/upload
+POST /v1/payload
 GET  /v1/payload/{payload_id}
 POST /v1/sessions/{session_id}/deletion-proof
 ```

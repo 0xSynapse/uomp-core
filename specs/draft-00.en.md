@@ -568,6 +568,10 @@ The Auth Service MUST verify `session_id` matches the path. If the Token has `ta
 | GET | `/v1/staged-writes` | List pending writes (admin) |
 | POST | `/v1/staged-writes/:id/approve` | Approve and apply a staged write (admin) |
 | POST | `/v1/staged-writes/:id/deny` | Deny a staged write (admin) |
+| POST | `/v1/payload` | Upload an encrypted payload envelope |
+| GET | `/v1/payload/:id` | Read a payload (same session or admin) |
+| GET | `/v1/payload` | List payload metadata (admin) |
+| DELETE | `/v1/payload/:id` | Delete a payload (admin) |
 
 ### 10.2 Read by Key
 
@@ -954,7 +958,7 @@ GET  /v1/memory/{key}
 GET  /v1/memory?tag={tag}
 GET  /v1/memory/aggregate?tag={tag}&op={op}
 GET  /v1/audit?session_id={session_id}
-POST /v1/payload/upload
+POST /v1/payload
 GET  /v1/payload/{payload_id}
 POST /v1/sessions/{session_id}/deletion-proof
 ```

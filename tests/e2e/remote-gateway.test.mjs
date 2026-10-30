@@ -187,6 +187,7 @@ test('remote Agent reaches local Guard through the mTLS Aegis Memory Gateway', {
     '--public-key', publicJwk,
     '--audience', AUDIENCE,
     '--allowed-endpoint', '/v1/memory',
+    '--allowed-endpoint', '/v1/payload',
     '--tls-cert', certs.serverCert,
     '--tls-key', certs.serverKey,
     '--client-ca', join(home, 'ca.pem'),
@@ -271,6 +272,36 @@ test('remote Agent reaches local Guard through the mTLS Aegis Memory Gateway', {
   });
   assert.equal(updated.status, 200, updated.body);
   assert.match(updated.body, /Ship it twice/);
+
+  const payloadUpload = await httpsRequest({
+    port: gatewayPort,
+    path: '/v1/payload',
+    token: grant.token,
+    ca: certs.ca,
+    cert: certs.clientCert,
+    key: certs.clientKey,
+    method: 'POST',
+    body: JSON.stringify({
+      encryption: { algorithm: 'ECDH-X25519-AES256GCM', sender_public_key: 'pk', nonce: 'n' },
+      ciphertext: 'base64ciphertext',
+      format: 'text/markdown',
+      size: 2048,
+      hash: 'sha256:abc',
+    }),
+  });
+  assert.equal(payloadUpload.status, 201, payloadUpload.body);
+  const { payload_id } = JSON.parse(payloadUpload.body);
+
+  const payloadGet = await httpsRequest({
+    port: gatewayPort,
+    path: `/v1/payload/${payload_id}`,
+    token: grant.token,
+    ca: certs.ca,
+    cert: certs.clientCert,
+    key: certs.clientKey,
+  });
+  assert.equal(payloadGet.status, 200, payloadGet.body);
+  assert.equal(JSON.parse(payloadGet.body).ciphertext, 'base64ciphertext');
 
   await jsonRequest(`${base}/v1/sessions/${session.session_id}/revoke`, {
     method: 'POST',
