@@ -38,7 +38,7 @@ const program = new Command();
 
 program
   .name('uomp')
-  .description('Give agents temporary, revocable access to your local notes and memory')
+  .description('UOMP reference CLI (product entry: aegis-os memory)')
   .version('0.0.1');
 
 program
@@ -225,6 +225,9 @@ program
     }));
 
 program.addHelpText('after', `
+Product entry:
+  $ aegis-os memory ...   (delegates to this reference CLI during migration)
+
 Fast path:
   $ uomp setup claude --vault ~/Obsidian/MyVault
   $ open Claude and ask it to read your notes
